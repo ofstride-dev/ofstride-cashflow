@@ -1,0 +1,31 @@
+{
+  "version": "2.0",
+<<<<<<< HEAD
+  "isDefaultHostConfig": true,
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
+  }
+}
+=======
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
+  },
+  "functionTimeout": "00:05:00",
+  "extensions": {
+    "http": {
+      "routePrefix": "api"
+    }
+  },
+  "cors": {
+    "allowedOrigins": [
+      "http://localhost:5173",
+      "http://localhost:4173",
+      "http://127.0.0.1:5173",
+      "https://localhost:5173"
+    ],
+    "supportCredentials": false
+  }
+}
+>>>>>>> b894fac (Initial commit)
