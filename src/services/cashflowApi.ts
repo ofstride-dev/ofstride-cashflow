@@ -41,9 +41,18 @@ function normalizeCashflowApiBase(value: string | undefined): string {
   // Function App hostname prevents production misconfiguration from turning
   // valid function routes into 404s (for example, /cashflow/ar instead of
   // /api/cashflow/ar). Local/SWA-relative paths are left unchanged.
-  if (/^https?:\/\//i.test(configured)) {
+  // GitHub/Azure secrets are often entered as a bare hostname. Treat that as
+  // an HTTPS endpoint rather than allowing fetch() to resolve it relative to
+  // the current SPA route (which produces e.g. /cashflow/<hostname>/api/... ).
+  const absoluteConfigured = /^https?:\/\//i.test(configured)
+    ? configured
+    : (/^[a-z0-9.-]+(?::\d+)?(?:\/|$)/i.test(configured) && !configured.startsWith("/")
+      ? `${/^localhost(?::|\/|$)|^127\.0\.0\.1(?::|\/|$)/i.test(configured) ? "http" : "https"}://${configured}`
+      : configured);
+
+  if (/^https?:\/\//i.test(absoluteConfigured)) {
     try {
-      const url = new URL(configured);
+      const url = new URL(absoluteConfigured);
       if (!url.pathname || url.pathname === "/") {
         url.pathname = "/api";
       } else if (!url.pathname.split("/").filter(Boolean).includes("api")) {
@@ -51,11 +60,11 @@ function normalizeCashflowApiBase(value: string | undefined): string {
       }
       return url.toString().replace(/\/+$/, "");
     } catch {
-      return configured;
+      return absoluteConfigured;
     }
   }
 
-  return configured;
+  return absoluteConfigured;
 }
 
 export const CASHFLOW_API_BASE = normalizeCashflowApiBase(
