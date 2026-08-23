@@ -1,13 +1,5 @@
 {
   "version": "2.0",
-<<<<<<< HEAD
-  "isDefaultHostConfig": true,
-  "extensionBundle": {
-    "id": "Microsoft.Azure.Functions.ExtensionBundle",
-    "version": "[4.*, 5.0.0)"
-  }
-}
-=======
   "extensionBundle": {
     "id": "Microsoft.Azure.Functions.ExtensionBundle",
     "version": "[4.*, 5.0.0)"
@@ -28,4 +20,3 @@
     "supportCredentials": false
   }
 }
->>>>>>> b894fac (Initial commit)

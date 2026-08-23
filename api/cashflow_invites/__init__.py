@@ -28,6 +28,11 @@ def _post_json(target: str, payload: dict) -> tuple[bool, str | None]:
     except url_error.HTTPError as exc:
         details = exc.read().decode("utf-8", errors="ignore")
         return False, f"HTTP {exc.code}: {details[:240]}"
+    except TimeoutError:
+        # The downstream mail function can deliver the message and then time
+        # out while returning its response. Do not revoke the invite in this
+        # ambiguous-but-successful delivery case.
+        return False, "__delivery_timeout__"
     except Exception as exc:
         return False, str(exc)
 
@@ -76,6 +81,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     )
 
     if not sent:
+        if notify_error == "__delivery_timeout__":
+            return _response(202, True, data={"sent": True, "delivery_pending": True})
         return _response(502, False, error=notify_error or "Invite email failed")
 
     return _response(200, True, data={"sent": True})

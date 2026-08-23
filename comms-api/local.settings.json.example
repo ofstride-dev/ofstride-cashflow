@@ -1,0 +1,15 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+
+    "ACS_ENDPOINT": "https://acs-ofs-001.india.communication.azure.com",
+    "EMAIL_SENDER_ADDRESS": "DoNotReply@eafd51a7-7800-4251-bf8f-a8b754530fc3.azurecomm.net",
+    "CAREER_NOTIFY_RECIPIENTS": "ofstride@gmail.com,i@ofstrideservices.com",
+    "NOTIFY_RECIPIENTS": "support@ofstrideservices.com,ofstride@gmail.com",
+    "CAREERS_NOTIFY_URL": "http://localhost:7072/api/career-notify",
+    "CONTACT_WEBHOOK_URL": "http://localhost:7072/api/career-notify",
+    "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:4280,https://white-water-027449900.7.azurestaticapps.net,https://ofstrideservices.com"
+  }
+}

@@ -1,8 +1,64 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
-import { Download, X } from 'lucide-react';
+import {
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Download,
+  GitCompareArrows,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Receipt,
+  UserPlus,
+  Wallet,
+  X,
+} from 'lucide-react';
 import { cashflowFetch } from '../../services/cashflowApi';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
+
+const NAV_ITEMS = [
+  { label: 'Dashboard', path: '/cashflow/dashboard', icon: LayoutDashboard },
+  { label: 'Payables (AP)', path: '/cashflow/ap', icon: ArrowUpCircle },
+  { label: 'Receivables (AR)', path: '/cashflow/ar', icon: ArrowDownCircle },
+  { label: 'Petty Cash', path: '/cashflow/pettycash', icon: Wallet },
+  { label: 'Bank Reconcile', path: '/cashflow/reconcile', icon: GitCompareArrows },
+  { label: 'Expense Portal', path: '/cashflow/expense', icon: Receipt },
+];
+
+function initialsFor(nameOrEmail) {
+  const source = String(nameOrEmail || '').trim();
+  if (!source) return 'U';
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return source.slice(0, 2).toUpperCase();
+}
+
+function NavLinks({ isActivePath, onNavigate }) {
+  return (
+    <nav className="flex flex-col gap-1" aria-label="Cashflow modules">
+      {NAV_ITEMS.map((item) => {
+        const isActive = isActivePath(item.path);
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.path}
+            to={item.path}
+            onClick={onNavigate}
+            aria-current={isActive ? 'page' : undefined}
+            className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+              isActive
+                ? 'dashboard-nav-active text-white shadow-[0_8px_24px_-10px_rgba(34,211,238,0.75)]'
+                : 'dashboard-nav-link text-slate-200 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="truncate">{item.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
 
 function CashflowShell() {
   const { session, profile, signOut, isAdmin, loading } = useCashflowAuth();
@@ -10,6 +66,7 @@ function CashflowShell() {
   const location = useLocation();
   const isLoginRoute = location.pathname.replace(/\/$/, '') === '/cashflow/login';
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
@@ -93,15 +150,6 @@ function CashflowShell() {
     }
   };
 
-  const navItems = [
-    { label: 'Dashboard', path: '/cashflow/dashboard' },
-    { label: 'Payables (AP)', path: '/cashflow/ap' },
-    { label: 'Receivables (AR)', path: '/cashflow/ar' },
-    { label: 'Petty Cash', path: '/cashflow/pettycash' },
-    { label: 'Bank Statement Reconcile', path: '/cashflow/reconcile' },
-    { label: 'Expense Portal', path: '/cashflow/expense' },
-  ];
-
   const isActivePath = (path) => {
     if (path === '/cashflow/expense') {
       return location.pathname.startsWith('/cashflow/expense');
@@ -109,9 +157,11 @@ function CashflowShell() {
     return location.pathname === path;
   };
 
+  const activeItem = NAV_ITEMS.find((item) => isActivePath(item.path));
+
   if (isLoginRoute) {
     return (
-      <div className="pt-12 sm:pt-16 min-h-screen bg-[radial-gradient(circle_at_0%_0%,rgba(56,189,248,0.10),transparent_40%),radial-gradient(circle_at_100%_100%,rgba(59,130,246,0.10),transparent_42%),#f8fafc]">
+      <div className="min-h-screen bg-[radial-gradient(circle_at_0%_0%,rgba(56,189,248,0.10),transparent_40%),radial-gradient(circle_at_100%_100%,rgba(59,130,246,0.10),transparent_42%),#f6f8fb]">
         <Outlet />
       </div>
     );
@@ -119,8 +169,11 @@ function CashflowShell() {
 
   if (loading) {
     return (
-      <div className="pt-12 sm:pt-16 min-h-screen bg-slate-50 flex items-center justify-center">
-        <p className="text-sm text-slate-600">Loading workspace…</p>
+      <div className="min-h-screen bg-surface flex items-center justify-center">
+        <div className="flex items-center gap-3 text-sm text-muted">
+          <span className="h-2 w-2 rounded-full bg-secondary animate-pulse" />
+          Loading workspace…
+        </div>
       </div>
     );
   }
@@ -129,91 +182,154 @@ function CashflowShell() {
     return <Navigate to="/cashflow/login" replace />;
   }
 
+  const displayName = profile?.company_name || 'Workspace setup pending';
+  const userLabel = session.user?.email || '';
+
   return (
-    <div className="pt-12 sm:pt-16 min-h-screen bg-[radial-gradient(circle_at_0%_0%,rgba(56,189,248,0.10),transparent_40%),radial-gradient(circle_at_100%_100%,rgba(59,130,246,0.10),transparent_42%),#f8fafc]">
-      <section className="py-10 sm:py-14">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="mb-6 sm:mb-8 rounded-2xl border border-slate-200 bg-white/90 backdrop-blur-sm shadow-sm px-5 sm:px-7 py-5 sm:py-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="dashboard-app min-h-screen lg:flex">
+      {/* Desktop sidebar */}
+      <aside className="dashboard-sidebar hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 lg:sticky lg:top-0 lg:h-screen">
+          <div className="px-5 py-6 border-b border-white/10">
+          <p className="dashboard-sidebar-brand-parent">OFSTRIDE</p>
+          <h1 className="dashboard-sidebar-brand-product">CASHFLOW</h1>
+          <p className="mt-5 text-[0.65rem] font-bold uppercase tracking-[0.16em] text-slate-500">Workspace</p>
+        </div>
+        <div className="flex-1 overflow-y-auto px-3 py-4">
+          <NavLinks isActivePath={isActivePath} />
+        </div>
+        <div className="px-3 py-4 border-t border-white/10">
+          {isAdmin && (
+            <Link
+              to="/cashflow/invites"
+                className="dashboard-nav-link flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/10 hover:text-white transition-colors"
+            >
+              <UserPlus className="h-4 w-4 shrink-0" aria-hidden="true" />
+              Invite Admin
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={signOut}
+            className="dashboard-nav-danger mt-1 flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-rose-200 hover:bg-rose-400/10 transition-colors"
+          >
+            <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Sign Out
+          </button>
+        </div>
+      </aside>
+
+      {/* Mobile nav drawer */}
+      {isMobileNavOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            className="absolute inset-0 bg-slate-900/45 backdrop-blur-[1px]"
+            onClick={() => setIsMobileNavOpen(false)}
+          />
+          <div className="dashboard-sidebar relative z-10 flex h-full w-72 max-w-[85vw] flex-col shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-5 border-b border-white/10">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-wider text-secondary mb-2">Solutions</p>
-                <h1 className="text-3xl sm:text-4xl font-bold text-primary">Managing Cashflow</h1>
-                <p className="text-text mt-3 max-w-3xl">
-                  Unified finance operations for AP, AR, petty cash, and employee expense workflows.
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">OfStride</p>
+                <h1 className="text-lg font-bold text-white mt-1">Cashflow</h1>
               </div>
-              <div className="text-right">
-                {session ? (
-                  <>
-                    <p className="text-sm font-medium text-primary">{profile?.company_name || 'Workspace setup pending'}</p>
-                    <p className="text-xs text-muted mt-1">{session.user?.email} · {profile?.role || 'employee'}</p>
-                    <div className="mt-3 flex flex-wrap justify-end gap-2">
-                      {isAdmin && (
-                        <Link to="/cashflow/invites" className="btn-ui btn-ui-sm btn-ui-neutral">
-                          Invite Admin
-                        </Link>
-                      )}
-                      <button type="button" onClick={signOut} className="btn-ui btn-ui-sm btn-ui-danger">
-                        Sign Out
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <Link to="/cashflow/login" className="btn-ui btn-ui-sm btn-ui-primary">
-                    Sign In
-                  </Link>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-white/95 border border-slate-200 shadow-[0_10px_30px_rgba(15,23,42,0.06)] p-2 sm:p-3 backdrop-blur-sm">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <nav className="flex flex-wrap items-center gap-2">
-              {navItems.map((item) => {
-                const isActive = isActivePath(item.path);
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`px-3.5 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors ${
-                      isActive
-                        ? 'bg-primary text-white shadow-[0_8px_20px_rgba(37,99,235,0.35)]'
-                        : 'text-text hover:bg-slate-100'
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                );
-              })}
-              </nav>
-
               <button
                 type="button"
-                onClick={openExportModal}
-                className="inline-flex w-fit items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50 text-secondary text-sm font-semibold hover:bg-blue-100 transition-colors whitespace-nowrap"
+                onClick={() => setIsMobileNavOpen(false)}
+                aria-label="Close navigation"
+                className="p-2 rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
               >
-                <Download className="w-4 h-4" />
-                GST compliance Export
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-3 py-4">
+              <NavLinks isActivePath={isActivePath} onNavigate={() => setIsMobileNavOpen(false)} />
+            </div>
+            <div className="px-3 py-4 border-t border-white/10">
+              {isAdmin && (
+                <Link
+                  to="/cashflow/invites"
+                  onClick={() => setIsMobileNavOpen(false)}
+                  className="dashboard-nav-link flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/10 hover:text-white"
+                >
+                  <UserPlus className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Invite Admin
+                </Link>
+              )}
+              <button
+                type="button"
+                onClick={signOut}
+                className="dashboard-nav-danger mt-1 flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-rose-200 hover:bg-rose-400/10"
+              >
+                <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
+                Sign Out
               </button>
             </div>
           </div>
-
-          <div className="mt-6 sm:mt-8">
-            <Outlet />
-          </div>
         </div>
-      </section>
+      )}
+
+      {/* Main column */}
+      <div className="flex-1 min-w-0">
+        <header className="dashboard-header sticky top-0 z-30 border-b border-white/10 backdrop-blur-xl">
+          <div className="flex items-center gap-3 px-4 sm:px-6 lg:px-8 py-3.5">
+            <button
+              type="button"
+              onClick={() => setIsMobileNavOpen(true)}
+              aria-label="Open navigation"
+              className="lg:hidden p-2 -ml-2 rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+
+            <div className="min-w-0 flex-1">
+              <div className="dashboard-page-chip"><span className="dashboard-page-dot" />{activeItem ? activeItem.label : displayName}</div>
+            </div>
+
+            <button
+              type="button"
+              onClick={openExportModal}
+              className="dashboard-export hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-cyan-200 text-sm font-semibold transition-colors whitespace-nowrap"
+            >
+              <Download className="w-4 h-4" />
+              GST Export
+            </button>
+            <button
+              type="button"
+              onClick={openExportModal}
+              aria-label="GST compliance export"
+              className="dashboard-export sm:hidden inline-flex items-center justify-center p-2 rounded-xl border text-cyan-200"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+
+            <div className="hidden md:flex items-center gap-2.5 pl-3 ml-1 border-l border-slate-200">
+              <span className="dashboard-avatar flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-slate-950">
+                {initialsFor(profile?.full_name || userLabel)}
+              </span>
+              <div className="text-left leading-tight">
+                <p className="text-sm font-medium text-white truncate max-w-[160px]">{displayName}</p>
+                <p className="text-xs text-slate-500 truncate max-w-[160px]">{profile?.role || 'employee'}</p>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="dashboard-main px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+          <Outlet />
+        </main>
+      </div>
 
       {isExportOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-[1px] flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-xl">
+          <div className="w-full max-w-lg card-ui">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <h3 className="text-lg font-semibold text-primary">GST compliance Export</h3>
+              <h3 className="text-lg font-semibold text-primary">GST Compliance Export</h3>
               <button
                 type="button"
                 onClick={closeExportModal}
                 disabled={isDownloading}
+                aria-label="Close export dialog"
                 className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"
               >
                 <X className="w-4 h-4" />
@@ -228,49 +344,41 @@ function CashflowShell() {
 
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-primary mb-1">Start Date</label>
+                  <label className="label-ui" htmlFor="gst-export-start">Start Date</label>
                   <input
+                    id="gst-export-start"
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm"
+                    className="input-ui"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-primary mb-1">End Date</label>
+                  <label className="label-ui" htmlFor="gst-export-end">End Date</label>
                   <input
+                    id="gst-export-end"
                     type="date"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm"
+                    className="input-ui"
                   />
                 </div>
               </div>
 
               {exportError && (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
                   {exportError}
                 </div>
               )}
             </div>
 
             <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={closeExportModal}
-                disabled={isDownloading}
-                className="px-4 py-2 rounded-xl border border-slate-200 text-sm font-medium text-text hover:bg-slate-50"
-              >
+              <button type="button" onClick={closeExportModal} disabled={isDownloading} className="btn-ui btn-ui-neutral">
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={handleDownload}
-                disabled={isDownloading}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-60"
-              >
+              <button type="button" onClick={handleDownload} disabled={isDownloading} className="btn-ui btn-ui-primary">
                 <Download className="w-4 h-4" />
-                {isDownloading ? 'Preparing...' : 'Download'}
+                {isDownloading ? 'Preparing…' : 'Download'}
               </button>
             </div>
           </div>

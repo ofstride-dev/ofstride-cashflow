@@ -134,7 +134,7 @@ function SubmitExpense() {
       const expense = await createExpense(payload);
 
       if (receiptFile) {
-        await uploadReceipt(receiptFile, user.id, expense.id);
+        await uploadReceipt(receiptFile, user.id, expense.id, companyId);
       }
 
       navigate(`/cashflow/expense/${expense.id}`);

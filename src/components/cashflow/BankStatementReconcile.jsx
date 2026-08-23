@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { cashflowFetch } from '../../services/cashflowApi';
 
 async function readErrorMessage(res) {
@@ -162,7 +162,7 @@ export default function BankStatementReconcile() {
 
   return (
     <div className="space-y-5">
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
+      <section className="card-ui p-5 sm:p-6">
         <h2 className="text-2xl font-bold text-primary">Bank Statement Reconcile</h2>
         <p className="text-sm text-slate-600 mt-1">
           Compare uploaded bank receipts, transactions, and statements with AP, AR, and Petty Cash records to identify mismatches before final posting.
@@ -175,7 +175,7 @@ export default function BankStatementReconcile() {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+              className="input-ui"
             />
           </div>
           <div>
@@ -184,7 +184,7 @@ export default function BankStatementReconcile() {
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+              className="input-ui"
             />
           </div>
           <div className="sm:col-span-2">
@@ -193,7 +193,7 @@ export default function BankStatementReconcile() {
               type="file"
               accept=".csv,.xlsx,.xls,.pdf"
               onChange={onFileChange}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm bg-white"
+              className="input-ui bg-white"
             />
           </div>
         </div>
@@ -203,7 +203,7 @@ export default function BankStatementReconcile() {
             type="button"
             onClick={() => runReconcile(false)}
             disabled={loading}
-            className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-60"
+            className="btn-ui btn-ui-primary"
           >
             {loading ? 'Processing...' : 'Run Statement Parse'}
           </button>
@@ -212,7 +212,7 @@ export default function BankStatementReconcile() {
               type="button"
               onClick={() => runReconcile(true)}
               disabled={loading}
-              className="px-4 py-2 rounded-xl border border-blue-200 bg-blue-50 text-secondary text-sm font-semibold hover:bg-blue-100 disabled:opacity-60"
+              className="btn-ui btn-ui-info"
             >
               {loading ? 'Processing...' : 'Run + Compare with AP/AR'}
             </button>
@@ -223,17 +223,17 @@ export default function BankStatementReconcile() {
                 type="button"
                 onClick={() => downloadCsv('mismatch')}
                 disabled={loading}
-                className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-medium text-text"
+                className="btn-ui btn-ui-neutral"
               >
-                Download Mismatches CSV
+                {comparisonMode === 'bank_only' ? 'Download Mismatches CSV (none)' : 'Download Mismatches CSV'}
               </button>
               <button
                 type="button"
                 onClick={() => downloadCsv('corrected')}
                 disabled={loading}
-                className="px-4 py-2 rounded-xl border border-blue-200 bg-blue-50 text-sm font-medium text-secondary"
+                className="btn-ui btn-ui-info"
               >
-                Download Corrected Suggestions
+                {comparisonMode === 'bank_only' ? 'Download Parsed Statement CSV' : 'Download Corrected Suggestions'}
               </button>
             </>
           )}
@@ -241,7 +241,7 @@ export default function BankStatementReconcile() {
 
         {(columnWarnings.length > 0 || rowIssuesCount > 0) && (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            <p className="font-semibold">Uploaded report has validation flags, but it is still visible for review.</p>
+            <p className="font-semibold">Uploaded report has review warnings, but it is still visible for review.</p>
             {columnWarnings.length > 0 && (
               <ul className="list-disc ml-5 mt-1 space-y-0.5">
                 {columnWarnings.map((warn, idx) => (
@@ -250,7 +250,7 @@ export default function BankStatementReconcile() {
               </ul>
             )}
             {rowIssuesCount > 0 && (
-              <p className="mt-1">{rowIssuesCount} row(s) have missing/invalid fields. We can review and correct these for you.</p>
+              <p className="mt-1">{rowIssuesCount} row(s) have missing/invalid fields and should be reviewed before posting.</p>
             )}
           </div>
         )}
@@ -270,7 +270,7 @@ export default function BankStatementReconcile() {
       </section>
 
       {summary && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
+        <section className="card-ui p-5 sm:p-6">
           <h3 className="text-lg font-semibold text-primary">Reconcile Summary</h3>
           <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-sm">
             <div className="rounded-xl border border-slate-200 px-3 py-2 bg-slate-50">
@@ -302,9 +302,9 @@ export default function BankStatementReconcile() {
       )}
 
       {rows.length > 0 && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
+        <section className="card-ui p-5 sm:p-6">
           <h3 className="text-lg font-semibold text-primary">Mismatch Samples</h3>
-          <div className="mt-3 overflow-x-auto">
+          <div className="mt-3 overflow-x-auto scroll-ui">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="text-left text-slate-500 border-b border-slate-100">
@@ -336,7 +336,7 @@ export default function BankStatementReconcile() {
       )}
 
       {uploadedRows.length > 0 && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
+        <section className="card-ui p-5 sm:p-6">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <h3 className="text-lg font-semibold text-primary">Uploaded Report Preview</h3>
             {rowIssuesCount > 0 && (
@@ -349,7 +349,7 @@ export default function BankStatementReconcile() {
             Report is shown even with errors. Flagged rows include suggestions so your team can review or use our assisted correction workflow.
           </p>
 
-          <div className="mt-3 overflow-x-auto">
+          <div className="mt-3 overflow-x-auto scroll-ui">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="text-left text-slate-500 border-b border-slate-100">

@@ -288,7 +288,16 @@ export function CashflowAuthProvider({ children }) {
 
   const acceptInvite = async (inviteToken, fullName) => {
     const result = await acceptCompanyInvite(inviteToken, fullName);
-    const nextProfile = await refreshProfile(session?.user?.id || null);
+    let currentUserId = session?.user?.id || null;
+    if (!currentUserId) {
+      try {
+        const { data } = await supabase.auth.getSession();
+        currentUserId = data?.session?.user?.id || null;
+      } catch {
+        currentUserId = null;
+      }
+    }
+    const nextProfile = await refreshProfile(currentUserId);
     return { ...result, profile: nextProfile };
   };
 

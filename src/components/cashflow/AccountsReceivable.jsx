@@ -1,7 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
+// AccountsReceivable.jsx
+// NOTE: Business logic (invoice CRUD, payments, approvals, HTML/CSV export)
+// is unchanged from the original implementation. Only the presentation layer
+// has been restyled onto the shared design system.
+
+import { useState, useEffect, useRef } from 'react';
+import { Download, Plus, Trash2 } from 'lucide-react';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
+
+function TableSkeleton() {
+  return (
+    <div className="p-6 space-y-3" aria-busy="true" aria-live="polite">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="skeleton-ui h-12" />
+      ))}
+      <span className="sr-only">Loading accounts receivable…</span>
+    </div>
+  );
+}
 
 export default function AccountsReceivable() {
   const { isAdmin, session, profile } = useCashflowAuth();
@@ -264,91 +281,57 @@ export default function AccountsReceivable() {
     .filter(inv => inv.status !== 'paid' && !inv.is_proforma)
     .reduce((acc, curr) => acc + (parseFloat(curr.amount || 0) + parseFloat(curr.gst_amount || 0)), 0);
 
-  // --- PREMIUM STYLES ---
-  const styles = {
-    container: { maxWidth: '1200px', margin: '0 auto', padding: '0.25rem 0.5rem 1.25rem', fontFamily: 'system-ui, -apple-system, sans-serif' },
-    headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' },
-    title: { margin: 0, color: '#0f172a', fontSize: '1.75rem', fontWeight: '700', letterSpacing: '-0.025em' },
-    metricCard: { padding: '1rem 1.5rem', background: 'linear-gradient(165deg, #ffffff, #f2f9ff)', borderRadius: '14px', boxShadow: '0 10px 24px rgba(15,23,42,0.06)', border: '1px solid #dbeafe' },
-    metricText: { color: '#64748b', fontSize: '0.875rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 0.25rem 0' },
-    metricValue: { color: '#0ea5e9', fontSize: '1.5rem', fontWeight: '700', margin: 0 },
-    card: { background: 'linear-gradient(165deg, #ffffff, #f8fbff)', padding: '2rem', borderRadius: '16px', boxShadow: '0 12px 28px rgba(15, 23, 42, 0.06)', marginBottom: '2.5rem', border: '1px solid #e2e8f0' },
-    cardTitle: { marginTop: 0, fontSize: '1.25rem', color: '#1e293b', fontWeight: '600', marginBottom: '1.5rem' },
-    formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.5rem', alignItems: 'end' },
-    label: { display: 'block', fontSize: '0.875rem', color: '#475569', fontWeight: '500', marginBottom: '0.5rem' },
-    input: { width: '100%', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.95rem', color: '#0f172a', transition: 'border-color 0.15s ease', boxSizing: 'border-box' },
-    checkboxLabel: { display: 'flex', alignItems: 'center', fontSize: '0.9rem', color: '#475569', fontWeight: '500', cursor: 'pointer', height: '45px' },
-    button: { padding: '0.75rem 1.5rem', backgroundColor: '#0f172a', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '0.95rem', height: '45px', transition: 'background-color 0.2s', boxShadow: '0 4px 6px -1px rgba(15, 23, 42, 0.2)' },
-    tableContainer: { backgroundColor: '#fff', borderRadius: '16px', boxShadow: '0 12px 28px rgba(15, 23, 42, 0.06)', overflow: 'hidden', border: '1px solid #e2e8f0' },
-    table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left', whiteSpace: 'nowrap' },
-    th: { padding: '1rem 1.5rem', backgroundColor: '#f8fafc', color: '#64748b', fontSize: '0.75rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #e2e8f0' },
-    td: { padding: '1rem 1.5rem', color: '#334155', fontSize: '0.95rem', borderBottom: '1px solid #f1f5f9' },
-    badgeProforma: { marginLeft: '8px', fontSize: '0.7rem', backgroundColor: '#fef08a', color: '#854d0e', padding: '0.25rem 0.5rem', borderRadius: '9999px', fontWeight: '600' },
-    badgePaid: { backgroundColor: '#dcfce7', color: '#166534', padding: '0.35rem 0.75rem', borderRadius: '9999px', fontSize: '0.8rem', fontWeight: '600', textTransform: 'capitalize' },
-    badgePending: { backgroundColor: '#f1f5f9', color: '#475569', padding: '0.35rem 0.75rem', borderRadius: '9999px', fontSize: '0.8rem', fontWeight: '600', textTransform: 'capitalize' },
-    actionBtn: { padding: '0.4rem 1rem', backgroundColor: '#f8fafc', color: '#0ea5e9', border: '1px solid #e0f2fe', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600' }
-  };
-
   return (
-    <div style={styles.container}>
-      
-      <div style={styles.headerRow}>
-        <h2 style={styles.title}>Accounts Receivable</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <button
-            type="button"
-            onClick={handleDownloadReport}
-            style={{
-              border: '1px solid #bfdbfe',
-              background: '#eff6ff',
-              color: '#1d4ed8',
-              fontWeight: 700,
-              borderRadius: 10,
-              padding: '9px 14px',
-              cursor: 'pointer',
-            }}
-          >
+    <div className="max-w-6xl mx-auto">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <h2 className="text-2xl font-bold text-primary sm:text-[1.75rem]">Accounts Receivable</h2>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <button type="button" onClick={handleDownloadReport} className="btn-ui btn-ui-info">
+            <Download className="h-4 w-4" />
             Download Report
           </button>
-          <div style={styles.metricCard}>
-            <p style={styles.metricText}>Total Outstanding</p>
-            <p style={styles.metricValue}>₹{totalOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+          <div className="rounded-2xl border border-sky-100 bg-gradient-to-br from-white to-sky-50 px-6 py-4 shadow-card">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted">Total Outstanding</p>
+            <p className="mt-0.5 text-2xl font-bold text-info tabular-nums">
+              ₹{totalOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </p>
           </div>
         </div>
       </div>
 
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>Create New Invoice</h3>
-        <form onSubmit={handleCreateInvoice} style={styles.formGrid}>
+      <div className="card-ui mb-10 p-6 sm:p-8">
+        <h3 className="mb-6 text-lg font-semibold text-primary">Create New Invoice</h3>
+        <form onSubmit={handleCreateInvoice} className="grid items-end gap-6" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
           <div>
-            <label style={styles.label}>Customer Name</label>
-            <input type="text" name="customer_name" value={formData.customer_name} onChange={handleInputChange} required style={styles.input} />
+            <label className="label-ui" htmlFor="ar-customer_name">Customer Name</label>
+            <input id="ar-customer_name" type="text" name="customer_name" value={formData.customer_name} onChange={handleInputChange} required className="input-ui" />
           </div>
           <div>
-            <label style={styles.label}>Invoice #</label>
-            <input type="text" name="invoice_number" value={formData.invoice_number} onChange={handleInputChange} placeholder="Auto-generated" style={styles.input} />
+            <label className="label-ui" htmlFor="ar-invoice_number">Invoice #</label>
+            <input id="ar-invoice_number" type="text" name="invoice_number" value={formData.invoice_number} onChange={handleInputChange} placeholder="Auto-generated" className="input-ui" />
           </div>
           <div>
-            <label style={styles.label}>Invoice Date</label>
-            <input type="date" name="invoice_date" value={formData.invoice_date} onChange={handleInputChange} required style={styles.input} />
+            <label className="label-ui" htmlFor="ar-invoice_date">Invoice Date</label>
+            <input id="ar-invoice_date" type="date" name="invoice_date" value={formData.invoice_date} onChange={handleInputChange} required className="input-ui" />
           </div>
           <div>
-            <label style={styles.label}>Amount (₹)</label>
-            <input type="number" name="amount" value={formData.amount} onChange={handleInputChange} required style={styles.input} />
+            <label className="label-ui" htmlFor="ar-amount">Amount (₹)</label>
+            <input id="ar-amount" type="number" name="amount" value={formData.amount} onChange={handleInputChange} required className="input-ui" />
           </div>
           <div>
-            <label style={styles.label}>GST Amount (₹)</label>
-            <input type="number" name="gst_amount" value={formData.gst_amount} onChange={handleInputChange} style={styles.input} />
+            <label className="label-ui" htmlFor="ar-gst_amount">GST Amount (₹)</label>
+            <input id="ar-gst_amount" type="number" name="gst_amount" value={formData.gst_amount} onChange={handleInputChange} className="input-ui" />
           </div>
           <div>
-            <label style={styles.label}>IRN Number</label>
-            <input type="text" name="irn_number" value={formData.irn_number} onChange={handleInputChange} placeholder="Optional" style={styles.input} />
+            <label className="label-ui" htmlFor="ar-irn_number">IRN Number</label>
+            <input id="ar-irn_number" type="text" name="irn_number" value={formData.irn_number} onChange={handleInputChange} placeholder="Optional" className="input-ui" />
           </div>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={styles.label}>Item / Service</label>
-            <div style={{ display: 'grid', gap: '0.5rem' }}>
+
+          <div className="col-span-full">
+            <label className="label-ui">Item / Service</label>
+            <div className="grid gap-2">
               {formData.item_services.map((item, index) => (
-                <div key={`item-${index}`} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <div key={`item-${index}`} className="flex items-center gap-2">
                   <input
                     type="text"
                     value={item}
@@ -358,7 +341,7 @@ export default function AccountsReceivable() {
                       setFormData({ ...formData, item_services: nextItems });
                     }}
                     placeholder={`Item/Service ${index + 1}`}
-                    style={styles.input}
+                    className="input-ui"
                   />
                   {formData.item_services.length > 1 && (
                     <button
@@ -367,9 +350,10 @@ export default function AccountsReceivable() {
                         const nextItems = formData.item_services.filter((_, idx) => idx !== index);
                         setFormData({ ...formData, item_services: nextItems.length ? nextItems : [''] });
                       }}
-                      style={{ ...styles.actionBtn, border: '1px solid #fecaca', color: '#b91c1c' }}
+                      aria-label={`Remove item ${index + 1}`}
+                      className="btn-ui btn-ui-sm btn-ui-danger shrink-0"
                     >
-                      Remove
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   )}
                 </div>
@@ -378,95 +362,100 @@ export default function AccountsReceivable() {
             <button
               type="button"
               onClick={() => setFormData({ ...formData, item_services: [...formData.item_services, ''] })}
-              style={{ ...styles.actionBtn, marginTop: '0.6rem' }}
+              className="btn-ui btn-ui-sm btn-ui-neutral mt-2.5"
             >
+              <Plus className="h-3.5 w-3.5" />
               Add Another Item
             </button>
           </div>
-          <div style={styles.checkboxLabel}>
-            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-              <input type="checkbox" name="is_proforma" checked={formData.is_proforma} onChange={handleInputChange} style={{ marginRight: '0.75rem', width: '18px', height: '18px' }} />
+
+          <div className="flex h-[45px] items-center">
+            <label className="flex cursor-pointer items-center text-sm font-medium text-text">
+              <input type="checkbox" name="is_proforma" checked={formData.is_proforma} onChange={handleInputChange} className="mr-3 h-[18px] w-[18px]" />
               Is Proforma Invoice?
             </label>
           </div>
-          <button type="submit" disabled={saving} style={styles.button}>
+
+          <button type="submit" disabled={saving} className="btn-ui btn-ui-primary h-[45px]">
             {saving ? 'Creating...' : 'Create Invoice'}
           </button>
         </form>
       </div>
 
-      <div style={styles.tableContainer}>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>Customer</th>
-              <th style={styles.th}>Invoice #</th>
-              <th style={styles.th}>Date</th>
-              <th style={styles.th}>Amount</th>
-              <th style={styles.th}>Total (w/ GST)</th>
-              <th style={styles.th}>Status</th>
-              <th style={styles.th}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoices.map((inv) => {
-              const total = parseFloat(inv.amount || 0) + parseFloat(inv.gst_amount || 0);
-              
-              return (
-                <tr key={inv.id}>
-                  <td style={{...styles.td, fontWeight: '500', color: '#0f172a'}}>
-                    {inv.cashflow_entities?.name || 'N/A'}
-                    {inv.is_proforma && <span style={styles.badgeProforma}>PROFORMA</span>}
-                  </td>
-                  <td style={styles.td}>
-                    <div style={{ fontWeight: '600' }}>{inv.invoice_number}</div>
-                    {inv.irn_number && <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '4px' }}>IRN: {inv.irn_number.substring(0, 10)}...</div>}
-                  </td>
-                  <td style={styles.td}>{inv.invoice_date}</td>
-                  <td style={styles.td}>₹{parseFloat(inv.amount || 0).toLocaleString('en-IN')}</td>
-                  <td style={{...styles.td, fontWeight: '600', color: '#0f172a'}}>₹{total.toLocaleString('en-IN')}</td>
-                  <td style={styles.td}>
-                    <span style={inv.status === 'paid' ? styles.badgePaid : styles.badgePending}>
-                      {inv.status}
-                    </span>
-                  </td>
-                  <td style={styles.td}>
-                    {inv.status === 'pending' && !inv.is_proforma && isAdmin && (
-                      <button
-                        onClick={() => handleApproveInvoice(inv.id)}
-                        disabled={approvingId === inv.id}
-                        style={{
-                          ...styles.actionBtn,
-                          marginRight: '0.5rem',
-                          color: '#ffffff',
-                          border: '1px solid #2563eb',
-                          backgroundColor: approvingId === inv.id ? '#94a3b8' : '#2563eb',
-                          cursor: approvingId === inv.id ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        {approvingId === inv.id ? 'Approving...' : 'Approve'}
-                      </button>
-                    )}
+      <div className="scroll-ui overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
+        {loading ? (
+          <TableSkeleton />
+        ) : (
+          <table className="table-ui whitespace-nowrap">
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Invoice #</th>
+                <th>Date</th>
+                <th>Amount</th>
+                <th>Total (w/ GST)</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv) => {
+                const total = parseFloat(inv.amount || 0) + parseFloat(inv.gst_amount || 0);
 
-                    {inv.status !== 'paid' && !inv.is_proforma && (
-                      <button onClick={() => handleRecordPayment(inv)} style={styles.actionBtn}>
-                        Collect
-                      </button>
-                    )}
-                    <button onClick={() => downloadInvoice(inv)} style={{ ...styles.actionBtn, marginLeft: '0.5rem' }}>
-                      Download
-                    </button>
+                return (
+                  <tr key={inv.id}>
+                    <td className="font-medium text-primary">
+                      {inv.cashflow_entities?.name || 'N/A'}
+                      {inv.is_proforma && (
+                        <span className="badge-ui badge-ui-warning ml-2 align-middle">Proforma</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="font-semibold">{inv.invoice_number}</div>
+                      {inv.irn_number && <div className="mt-1 text-xs text-muted">IRN: {inv.irn_number.substring(0, 10)}...</div>}
+                    </td>
+                    <td>{inv.invoice_date}</td>
+                    <td className="tabular-nums">₹{parseFloat(inv.amount || 0).toLocaleString('en-IN')}</td>
+                    <td className="font-semibold text-primary tabular-nums">₹{total.toLocaleString('en-IN')}</td>
+                    <td>
+                      <span className={`badge-ui ${inv.status === 'paid' ? 'badge-ui-success' : 'badge-ui-neutral'}`}>
+                        {inv.status}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {inv.status === 'pending' && !inv.is_proforma && isAdmin && (
+                          <button
+                            onClick={() => handleApproveInvoice(inv.id)}
+                            disabled={approvingId === inv.id}
+                            className="btn-ui btn-ui-sm btn-ui-secondary"
+                          >
+                            {approvingId === inv.id ? 'Approving...' : 'Approve'}
+                          </button>
+                        )}
+                        {inv.status !== 'paid' && !inv.is_proforma && (
+                          <button onClick={() => handleRecordPayment(inv)} className="btn-ui btn-ui-sm btn-ui-info">
+                            Collect
+                          </button>
+                        )}
+                        <button onClick={() => downloadInvoice(inv)} className="btn-ui btn-ui-sm btn-ui-neutral">
+                          Download
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!loading && invoices.length === 0 && (
+                <tr>
+                  <td colSpan="7" className="py-12 text-center text-muted">
+                    No invoices created yet.
                   </td>
                 </tr>
-              );
-            })}
-            {!loading && invoices.length === 0 && (
-              <tr>
-                <td colSpan="7" style={{ padding: '3rem', textAlign: 'center', color: '#94a3b8' }}>No invoices created yet.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

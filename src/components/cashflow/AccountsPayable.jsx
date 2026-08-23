@@ -1,12 +1,33 @@
 // AccountsPayable.jsx
-// Premium UI version.
-// NOTE: Business logic is unchanged from your original file.
-// Replace this file with your existing logic if you've made changes after sharing it.
+// NOTE: Business logic (fetching, OCR, save, approve, export) is unchanged
+// from the original implementation. Only the presentation layer has been
+// restyled onto the shared design system.
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { Download, FileUp, ShieldCheck } from 'lucide-react';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
+
+const FIELD_ROWS = [
+  ['Vendor Name', 'vendor_name', 'text'],
+  ['Invoice #', 'bill_number', 'text'],
+  ['Invoice Date', 'bill_date', 'date'],
+  ['Total Amount Before GST', 'amount_before_gst', 'number'],
+  ['GST Total', 'gst_amount', 'number'],
+  ['Total Amount', 'total_amount', 'number'],
+];
+
+function TableSkeleton() {
+  return (
+    <div className="p-6 space-y-3" aria-busy="true" aria-live="polite">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="skeleton-ui h-12" />
+      ))}
+      <span className="sr-only">Loading accounts payable…</span>
+    </div>
+  );
+}
 
 export default function AccountsPayable() {
   const { isAdmin, session, profile } = useCashflowAuth();
@@ -257,85 +278,76 @@ export default function AccountsPayable() {
     );
   };
 
-  const inputStyle={
-    width:'100%',height:48,padding:'0 16px',border:'1px solid #dbe4ee',
-    borderRadius:12,fontSize:15,outline:'none',boxSizing:'border-box'
-  };
-
   return (
-    <div style={{maxWidth:1280,margin:'0 auto',padding:'8px 8px 20px'}}>
-      <div style={{marginBottom:20,padding:'16px 18px',border:'1px solid #e2e8f0',borderRadius:16,background:'linear-gradient(165deg, #ffffff, #f8fbff)',boxShadow:'0 10px 24px rgba(15,23,42,0.04)'}}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <h2 style={{fontSize:32,fontWeight:700,margin:'0 0 6px 0',color:'#0f172a'}}>Accounts Payable</h2>
-            <p style={{margin:0,color:'#64748b',fontSize:14}}>Capture vendor bills, apply tax rules, and maintain a clean payable register.</p>
-          </div>
-          <button
-            type="button"
-            onClick={handleDownloadReport}
-            style={{
-              border: '1px solid #bfdbfe',
-              background: '#eff6ff',
-              color: '#1d4ed8',
-              fontWeight: 700,
-              borderRadius: 10,
-              padding: '9px 14px',
-              cursor: 'pointer',
-            }}
-          >
-            Download Report
-          </button>
+    <div className="max-w-6xl mx-auto">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-sky-50/60 px-5 py-5 shadow-card sm:px-6">
+        <div>
+          <h2 className="text-2xl font-bold text-primary sm:text-[1.75rem]">Accounts Payable</h2>
+          <p className="mt-1 text-sm text-muted">Capture vendor bills, apply tax rules, and maintain a clean payable register.</p>
         </div>
+        <button type="button" onClick={handleDownloadReport} className="btn-ui btn-ui-info">
+          <Download className="h-4 w-4" />
+          Download Report
+        </button>
       </div>
 
-      <div style={{display:'flex',gap:24,flexWrap:'wrap',marginBottom:30}}>
-        <div style={{flex:'1 1 320px',background:'#fff',border:'2px dashed #dbe4ee',borderRadius:18,padding:40,textAlign:'center',boxShadow:'0 12px 30px rgba(15,23,42,.06)'}}>
-          <h3>Upload Vendor Invoice</h3>
-          <p style={{color:'#64748b'}}>Upload PDF or image. AI extracts everything automatically.</p>
-          <input type="file" accept=".pdf,image/*" onChange={handleFileUpload}/>
-          {ocrLoading&&<div style={{marginTop:16,display:'inline-block',padding:'12px 18px',background:'#eff6ff',borderRadius:12,color:'#2563eb',fontWeight:600}}>Scanning document…</div>}
+      <div className="mb-7 flex flex-wrap gap-6">
+        <div className="flex-1 min-w-[280px] rounded-2xl border-2 border-dashed border-slate-200 bg-white p-8 text-center shadow-card">
+          <FileUp className="mx-auto h-8 w-8 text-secondary" aria-hidden="true" />
+          <h3 className="mt-3 text-lg font-semibold text-primary">Upload Vendor Invoice</h3>
+          <p className="mt-1 text-sm text-muted">Upload PDF or image. AI extracts everything automatically.</p>
+          <label className="mt-4 inline-block">
+            <span className="sr-only">Upload invoice file</span>
+            <input
+              type="file"
+              accept=".pdf,image/*"
+              onChange={handleFileUpload}
+              className="mx-auto block text-sm text-text file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3.5 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-primary-hover"
+            />
+          </label>
+
+          {ocrLoading && (
+            <div className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2.5 text-sm font-semibold text-secondary">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-secondary" />
+              Scanning document…
+            </div>
+          )}
           {!ocrLoading && ocrStatus.message && (
             <div
-              style={{
-                marginTop: 12,
-                padding: '10px 12px',
-                borderRadius: 10,
-                fontSize: 13,
-                fontWeight: 600,
-                border: ocrStatus.type === 'success' ? '1px solid #86efac' : ocrStatus.type === 'warning' ? '1px solid #fcd34d' : '1px solid #fecaca',
-                background: ocrStatus.type === 'success' ? '#f0fdf4' : ocrStatus.type === 'warning' ? '#fffbeb' : '#fef2f2',
-                color: ocrStatus.type === 'success' ? '#166534' : ocrStatus.type === 'warning' ? '#92400e' : '#991b1b',
-              }}
+              className={`mt-3 rounded-xl border px-3 py-2.5 text-left text-[0.8rem] font-semibold ${
+                ocrStatus.type === 'success'
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                  : ocrStatus.type === 'warning'
+                  ? 'border-amber-300 bg-amber-50 text-amber-800'
+                  : 'border-rose-300 bg-rose-50 text-rose-800'
+              }`}
+              role="status"
             >
               {ocrStatus.message}
-              {ocrDebugDetail && (
-                <div style={{ marginTop: 6, fontSize: 12, fontWeight: 500, opacity: 0.9 }}>
-                  Detail: {ocrDebugDetail}
-                </div>
-              )}
+              {ocrDebugDetail && <div className="mt-1.5 text-xs font-medium opacity-90">Detail: {ocrDebugDetail}</div>}
             </div>
           )}
         </div>
 
-        <div style={{flex:'2 1 500px',background:'linear-gradient(165deg, #ffffff, #f8fbff)',borderRadius:18,padding:32,boxShadow:'0 14px 35px rgba(15,23,42,.07)',border:'1px solid #e2e8f0'}}>
-          <h3 style={{marginTop:0}}>Verify & Apply Tax</h3>
-          <form onSubmit={handleSaveInvoice} style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
-            {[
-              ['Vendor Name','vendor_name','text'],
-              ['Invoice #','bill_number','text'],
-              ['Invoice Date','bill_date','date'],
-              ['Total Amount Before GST','amount_before_gst','number'],
-              ['GST Total','gst_amount','number'],
-              ['Total Amount','total_amount','number']
-            ].map(([label,name,type])=>(
+        <div className="flex-[2] min-w-[420px] rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-sky-50/60 p-6 shadow-card sm:p-8">
+          <h3 className="mb-5 text-lg font-semibold text-primary">Verify &amp; Apply Tax</h3>
+          <form onSubmit={handleSaveInvoice} className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            {FIELD_ROWS.map(([label, name, type]) => (
               <div key={name}>
-                <label style={{display:'block',fontSize:12,fontWeight:700,textTransform:'uppercase',color:'#64748b',marginBottom:8}}>{label}</label>
-                <input type={type} name={name} value={formData[name]} onChange={handleInputChange} style={inputStyle}/>
+                <label className="label-ui" htmlFor={`ap-${name}`}>{label}</label>
+                <input
+                  id={`ap-${name}`}
+                  type={type}
+                  name={name}
+                  value={formData[name]}
+                  onChange={handleInputChange}
+                  className="input-ui h-12"
+                />
               </div>
             ))}
             <div>
-              <label style={{display:'block',fontSize:12,fontWeight:700,textTransform:'uppercase',color:'#64748b',marginBottom:8}}>TDS Rule</label>
-              <select name="tds_section" value={formData.tds_section} onChange={handleInputChange} style={inputStyle}>
+              <label className="label-ui" htmlFor="ap-tds_section">TDS Rule</label>
+              <select id="ap-tds_section" name="tds_section" value={formData.tds_section} onChange={handleInputChange} className="input-ui h-12 bg-white">
                 <option value="NONE">No TDS</option>
                 <option value="194C_IND">194C Individual</option>
                 <option value="194C_CORP">194C Corporate</option>
@@ -344,60 +356,71 @@ export default function AccountsPayable() {
               </select>
             </div>
 
-            <button type="submit" style={{gridColumn:'span 2',height:52,border:'none',borderRadius:12,background:'#0f172a',color:'#fff',fontWeight:700,cursor:'pointer'}}>Approve & Save Bill</button>
+            <button type="submit" className="btn-ui btn-ui-primary col-span-full h-12">
+              <ShieldCheck className="h-4 w-4" />
+              Approve &amp; Save Bill
+            </button>
           </form>
         </div>
       </div>
 
-      <div style={{background:'#fff',borderRadius:18,overflow:'hidden',boxShadow:'0 12px 30px rgba(15,23,42,.05)',border:'1px solid #e2e8f0'}}>
-        <table style={{width:'100%',borderCollapse:'collapse'}}>
-          <thead style={{background:'#f8fafc'}}>
-            <tr>
-              {['Vendor','Bill #','Due Date','Gross','GST','TDS','Net','Status','Actions'].map(h=><th key={h} style={{padding:'18px 24px',textAlign:'left',fontSize:12,textTransform:'uppercase',color:'#64748b'}}>{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {invoices.map(inv=>{
-              const vendor=inv.cashflow_entities?.name||'N/A';
-              const net=(+inv.amount||0)-(+inv.tds_amount||0);
-              const pending = inv.status === 'pending';
-              const approving = approvingId === inv.id;
-              return <tr key={inv.id} style={{borderTop:'1px solid #f1f5f9'}}>
-                <td style={{padding:20,fontWeight:600}}>{vendor}</td>
-                <td style={{padding:20}}>{inv.bill_number}</td>
-                <td style={{padding:20}}>{inv.due_date}</td>
-                <td style={{padding:20,fontWeight:600}}>₹{(+inv.amount||0).toLocaleString('en-IN')}</td>
-                <td style={{padding:20,fontWeight:600,color:'#0369a1'}}>₹{(+inv.gst_amount||0).toLocaleString('en-IN')}</td>
-                <td style={{padding:20,color:'#dc2626'}}>-₹{(+inv.tds_amount||0).toLocaleString('en-IN')}</td>
-                <td style={{padding:20,color:'#059669',fontWeight:700}}>₹{net.toLocaleString('en-IN')}</td>
-                <td style={{padding:20}}><span style={{padding:'7px 14px',borderRadius:999,background:'#FEF3C7',color:'#92400E',fontWeight:600,fontSize:13}}>{inv.status}</span></td>
-                <td style={{padding:20}}>
-                  {pending && isAdmin ? (
-                    <button
-                      type="button"
-                      onClick={() => handleApproveBill(inv.id)}
-                      disabled={approving}
-                      style={{
-                        border: 'none',
-                        borderRadius: 8,
-                        padding: '8px 12px',
-                        fontWeight: 700,
-                        cursor: approving ? 'not-allowed' : 'pointer',
-                        background: approving ? '#94a3b8' : '#2563eb',
-                        color: '#fff',
-                      }}
-                    >
-                      {approving ? 'Approving...' : 'Approve'}
-                    </button>
-                  ) : (
-                    <span style={{ color: '#64748b', fontSize: 13 }}>-</span>
-                  )}
-                </td>
+      <div className="scroll-ui overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
+        {loading ? (
+          <TableSkeleton />
+        ) : (
+          <table className="table-ui">
+            <thead>
+              <tr>
+                {['Vendor', 'Bill #', 'Due Date', 'Gross', 'GST', 'TDS', 'Net', 'Status', 'Actions'].map((h) => (
+                  <th key={h}>{h}</th>
+                ))}
               </tr>
-            })}
-            {!loading&&invoices.length===0&&<tr><td colSpan="9" style={{padding:40,textAlign:'center',color:'#64748b'}}>No AP bills recorded yet.</td></tr>}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {invoices.map((inv) => {
+                const vendor = inv.cashflow_entities?.name || 'N/A';
+                const net = (+inv.amount || 0) - (+inv.tds_amount || 0);
+                const pending = inv.status === 'pending';
+                const approving = approvingId === inv.id;
+                return (
+                  <tr key={inv.id}>
+                    <td className="font-semibold text-primary">{vendor}</td>
+                    <td>{inv.bill_number}</td>
+                    <td>{inv.due_date}</td>
+                    <td className="font-semibold text-primary tabular-nums">₹{(+inv.amount || 0).toLocaleString('en-IN')}</td>
+                    <td className="font-semibold text-info tabular-nums">₹{(+inv.gst_amount || 0).toLocaleString('en-IN')}</td>
+                    <td className="text-danger tabular-nums">-₹{(+inv.tds_amount || 0).toLocaleString('en-IN')}</td>
+                    <td className="font-bold text-success tabular-nums">₹{net.toLocaleString('en-IN')}</td>
+                    <td>
+                      <span className="badge-ui badge-ui-warning">{inv.status}</span>
+                    </td>
+                    <td>
+                      {pending && isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => handleApproveBill(inv.id)}
+                          disabled={approving}
+                          className="btn-ui btn-ui-sm btn-ui-secondary"
+                        >
+                          {approving ? 'Approving…' : 'Approve'}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-muted">-</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!loading && invoices.length === 0 && (
+                <tr>
+                  <td colSpan="9" className="py-10 text-center text-muted">
+                    No AP bills recorded yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

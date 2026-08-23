@@ -1,11 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
-import { Globe, Sparkles, X } from "lucide-react";
+import { ArrowUpRight, LineChart, Sparkles, X } from "lucide-react";
 import { getCashflowPostAuthRoute, useCashflowAuth } from "../../context/CashflowAuthContext";
 import { sendPasswordResetEmail } from "../../services/supabase";
+import ofstrideLogo from "../../assets/Screenshot 2026-08-20 194422.png";
+
+function GoogleIcon({ className = "h-5 w-5" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#4285F4" d="M21.35 12.27c0-.72-.06-1.42-.18-2.09H12v3.96h5.24a4.48 4.48 0 0 1-1.94 2.94v2.45h3.14c1.84-1.69 2.91-4.18 2.91-7.26Z" />
+      <path fill="#34A853" d="M12 21.7c2.63 0 4.84-.87 6.45-2.37l-3.14-2.45c-.87.58-1.98.92-3.31.92-2.54 0-4.69-1.72-5.46-4.03H3.3v2.53A9.74 9.74 0 0 0 12 21.7Z" />
+      <path fill="#FBBC05" d="M6.54 13.77A5.85 5.85 0 0 1 6.23 12c0-.62.11-1.22.31-1.77V7.7H3.3A9.74 9.74 0 0 0 2.27 12c0 1.56.37 3.03 1.03 4.3l3.24-2.53Z" />
+      <path fill="#EA4335" d="M12 6.2c1.43 0 2.72.49 3.73 1.46l2.8-2.8C16.84 3.3 14.63 2.3 12 2.3A9.74 9.74 0 0 0 3.3 7.7l3.24 2.53C7.31 7.92 9.46 6.2 12 6.2Z" />
+    </svg>
+  );
+}
 
 function CashflowLogin() {
-  const { session, profile, profileError, signIn, signInWithGoogle, signInWithInviteLink, loading, signOut } = useCashflowAuth();
+  const { session, profile, profileError, signIn, signInWithGoogle, signInWithInviteLink, loading } = useCashflowAuth();
   const [searchParams] = useSearchParams();
 
   const [email, setEmail] = useState("");
@@ -130,64 +142,66 @@ function CashflowLogin() {
   };
 
   return (
-    <section className="px-4 pt-4 pb-4 sm:px-6 sm:pt-6 sm:pb-6 lg:px-8">
-      <div className="mx-auto w-full max-w-7xl">
-        <div className="grid min-h-[calc(100vh-12rem)] items-start gap-6 lg:grid-cols-2">
-          <div className="relative mt-4 overflow-hidden rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-100 via-cyan-50 to-blue-100 px-5 py-6 text-slate-900 shadow-[0_20px_45px_-28px_rgba(14,116,144,0.45)] sm:px-6 sm:py-7 lg:px-8">
-            <div className="pointer-events-none absolute -right-8 -top-10 h-44 w-44 rounded-full bg-sky-300/30 blur-2xl" />
-            <div className="pointer-events-none absolute -bottom-16 -left-10 h-56 w-56 rounded-full bg-cyan-300/25 blur-3xl" />
-            <div className="relative flex flex-col justify-center rounded-2xl border border-white/70 bg-white/55 p-4 backdrop-blur-md sm:p-5">
-            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-300 bg-cyan-50/90 px-3 py-1 text-xs font-semibold text-cyan-900">
-              <Sparkles className="h-3.5 w-3.5" />
-              One source of truth for all cash-flow.
+      <section className="login-stage relative flex h-screen min-h-0 w-full overflow-hidden p-0">
+        <div className="login-shell relative z-10 flex h-full min-h-0 w-full max-w-none overflow-hidden lg:grid lg:grid-cols-[30%_70%]">
+          <div className="login-intro relative flex w-full flex-col justify-between overflow-hidden px-7 py-8 text-slate-900 sm:px-10 lg:px-8 lg:py-10">
+            <div className="login-orbit login-orbit-one" />
+            <div className="login-orbit login-orbit-two" />
+            <div className="relative z-10">
+            <div className="login-service-label">
+              <span className="login-service-icon"><img src={ofstrideLogo} alt="Ofstride Services logo" /></span>
+              <span className="login-service-copy"><strong>Cashflow</strong><small>by OFSTRIDE SERVICES</small></span>
             </div>
-            <h1 className="mt-5 text-4xl font-extrabold leading-[1.04] tracking-[-0.035em] text-slate-900 sm:text-5xl">
-              CashFlow built
-              <span className="block bg-gradient-to-r from-sky-700 via-blue-700 to-cyan-600 bg-clip-text text-transparent">around intelligence</span>
-            </h1>
-            <p className="mt-4 max-w-xl text-[1.03rem] leading-7 text-slate-700">
-              Unified payables, receivables, expenses, and GST visibility in one real-time finance cockpit.
-            </p>
-            <p className="mt-1.5 max-w-xl text-[0.98rem] leading-7 text-slate-600">
-              Cut manual effort, reduce cash leaks, and make faster decisions with AI-assisted cashflow signals.
-            </p>
-
-            <button
-              type="button"
-              onClick={() => {
-                setError("");
-                setInfo("");
-                setAuthMode("get-started");
-                setAuthModalOpen(true);
-              }}
-              className="mt-8 inline-flex w-fit items-center justify-center gap-2 rounded-2xl bg-slate-900 px-7 py-3.5 text-lg font-semibold text-white shadow-[0_14px_30px_-14px_rgba(15,23,42,0.5)] hover:bg-slate-800"
-            >
-              <Sparkles className="h-5 w-5 text-amber-300" />
-              Get Started for Free
-            </button>
+            <div className="login-inline-card">
+              <h1>{authMode === "sign-in" ? "Sign in to your workspace" : "Get started in under a minute"}</h1>
+              <p className="login-inline-subtitle">Unified payables, receivables, expenses & GST — one finance cockpit.</p>
+              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" className="login-inline-input" readOnly={Boolean(inviteToken && inviteEmail)} autoComplete="email" />
+              {authMode === "sign-in" && !inviteToken ? <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" className="login-inline-input" autoComplete="current-password" /> : null}
+              <button type="button" onClick={authMode === "sign-in" && !inviteToken ? handlePasswordSignIn : handleEmailLink} disabled={submitting} className="login-inline-submit">{authMode === "sign-in" && !inviteToken ? "Sign In" : "Get Started"}</button>
+              {!inviteToken ? <button type="button" onClick={() => { setError(""); setInfo(""); setAuthMode((current) => current === "sign-in" ? "get-started" : "sign-in"); }} className="login-inline-switch">{authMode === "sign-in" ? "New user? Get started" : "Existing user? Sign in"}</button> : null}
+              <div className="login-inline-divider"><span />OR<span /></div>
+              <button type="button" onClick={handleGoogleSignIn} className="login-inline-google"><GoogleIcon className="h-4 w-4" /> Sign up with Google</button>
+              {error ? <div className="login-inline-error">{error}</div> : null}
+              {info ? <div className="login-inline-success">{info}</div> : null}
+              <p className="login-inline-foot">OFSTRIDE SERVICES · No credit card needed.</p>
+            </div>
             </div>
           </div>
 
-          <div className="mt-4 flex min-h-[420px] flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)] sm:p-5">
-            <div className="relative overflow-hidden rounded-xl border-4 border-black bg-white shadow-[0_14px_32px_-16px_rgba(15,23,42,0.55)]">
-              <img
-                src="/dashboard.png"
-                alt="Cashflow dashboard preview"
-                className="h-[56vh] min-h-[360px] w-full object-cover object-top"
-                loading="eager"
-              />
-            </div>
-
-            <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-slate-700">
-              First person to sign in and create a company becomes the workspace owner. Owners can invite admins and employees to the same workspace using invite links.
+          <div className="login-visual-panel relative flex min-h-0 w-full items-center justify-center overflow-hidden px-6 py-8 sm:px-10 lg:px-14 lg:py-8">
+            <div className="login-orbit login-orbit-one" />
+            <div className="login-orbit login-orbit-two" />
+            <div className="login-visual-copy relative z-10">
+              <span className="login-board-kicker">Your cashflow, in motion</span>
+              <h2>See the signal<br /><span>behind every rupee.</span></h2>
+              <p>Track inflow, outflow, and runway with a living view of your business finances.</p>
+            <div className="login-finance-board" aria-label="Animated mock cashflow dashboard">
+              <div className="login-board-header"><div><span className="login-board-kicker">Cashflow pulse</span><strong>₹ 18.42L</strong><small>Net position <b>+12.8%</b> this month</small></div></div>
+              <div className="login-board-chart">
+                <div className="login-chart-grid"><span>20L</span><span>15L</span><span>10L</span><span>5L</span><span>0</span></div>
+                <svg viewBox="0 0 540 170" role="img" aria-label="Rising inflow and outflow trend graph" preserveAspectRatio="none">
+                  <defs><linearGradient id="loginArea" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#38bdf8" stopOpacity=".35" /><stop offset="1" stopColor="#38bdf8" stopOpacity="0" /></linearGradient></defs>
+                  <path className="login-chart-area" d="M0 145 C30 135 45 130 70 136 S105 105 130 115 S165 100 190 104 S225 80 250 93 S280 55 310 70 S350 40 380 53 S420 28 450 38 S500 12 540 20 L540 170 L0 170Z" />
+                  <path className="login-chart-line" d="M0 145 C30 135 45 130 70 136 S105 105 130 115 S165 100 190 104 S225 80 250 93 S280 55 310 70 S350 40 380 53 S420 28 450 38 S500 12 540 20" />
+                  <circle className="login-chart-dot" cx="450" cy="38" r="5" /><circle className="login-chart-dot login-chart-dot-pulse" cx="450" cy="38" r="10" />
+                </svg>
+                <div className="login-chart-months"><span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span></div>
+                <div className="login-chart-scan" />
+              </div>
+              <div className="login-board-bottom">
+                <div className="login-mini-stat"><span>Inflow</span><strong>₹ 26.8L</strong><b className="positive">↗ 18.4%</b></div>
+                <div className="login-mini-bars" aria-label="Animated inflow and outflow bars">{[42, 68, 51, 82, 63, 94, 76].map((height, index) => <i key={index} style={{ '--bar-height': `${height}%` }} />)}</div>
+                <div className="login-mini-stat"><span>Outflow</span><strong>₹ 8.3L</strong><b>↘ 4.2%</b></div>
+              </div>
+              <div className="login-board-table"><span>RECENT MOVEMENTS</span><div><b>Vendor payouts</b><strong>− ₹ 2.4L</strong></div><div><b>Client receipts</b><strong className="positive">+ ₹ 6.8L</strong></div></div>
             </div>
           </div>
         </div>
-      </div>
+        </div>
 
-      {authModalOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-3xl rounded-3xl bg-white px-6 py-7 shadow-[0_24px_70px_-30px_rgba(15,23,42,0.55)] sm:px-8 sm:py-8">
+      {authModalOpen && inviteToken ? (
+        <div className="login-auth-overlay fixed inset-0 z-[90] flex items-center justify-center px-4 py-6 backdrop-blur-sm">
+          <div className="login-auth-card w-full max-w-md rounded-[1.75rem] px-6 py-7 sm:px-8 sm:py-8">
             <div className="flex justify-end">
               <button
                 type="button"
@@ -219,7 +233,7 @@ function CashflowLogin() {
               </p>
             ) : null}
 
-            <div className="mt-7 rounded-2xl bg-slate-50 p-3 sm:p-4">
+            <div className="login-auth-fields mt-7 rounded-2xl p-3 sm:p-4">
               <div className="space-y-3">
                 <input
                   type="email"
@@ -286,7 +300,7 @@ function CashflowLogin() {
               onClick={handleGoogleSignIn}
               className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white text-base font-medium text-slate-900 shadow-sm hover:bg-slate-50"
             >
-              <Globe className="h-5 w-5" />
+              <GoogleIcon className="h-5 w-5" />
               Sign up with Google
             </button>
 
@@ -306,7 +320,7 @@ function CashflowLogin() {
               </div>
             ) : null}
 
-            <p className="mt-6 text-center text-sm text-slate-500">No credit card needed.</p>
+            <p className="mt-6 text-center text-sm text-slate-500">OFSTRIDE SERVICES · Secure workspace access · No credit card needed.</p>
           </div>
         </div>
       ) : null}

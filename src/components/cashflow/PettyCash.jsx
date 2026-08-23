@@ -1,7 +1,24 @@
-import React, { useState, useEffect } from 'react';
+// PettyCash.jsx
+// NOTE: Business logic (ledger fetch, entry submit, approval, CSV export) is
+// unchanged from the original implementation. Only the presentation layer
+// has been restyled onto the shared design system.
+
+import { useState, useEffect } from 'react';
+import { Download, Sparkles } from 'lucide-react';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
+
+function TableSkeleton() {
+  return (
+    <div className="p-6 space-y-3" aria-busy="true" aria-live="polite">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="skeleton-ui h-12" />
+      ))}
+      <span className="sr-only">Loading petty cash ledger…</span>
+    </div>
+  );
+}
 
 export default function PettyCash() {
   const { isAdmin, session, profile } = useCashflowAuth();
@@ -136,163 +153,117 @@ export default function PettyCash() {
     return acc + cashIn - cashOut;
   }, 0);
 
-  const headerStyles = {
-    headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', gap: '1rem', flexWrap: 'wrap' },
-    title: { margin: 0, color: '#0f172a', fontSize: '1.75rem', fontWeight: '700', letterSpacing: '-0.025em' },
-    metricCard: { padding: '1rem 1.5rem', backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)', border: '1px solid #f1f5f9' },
-    metricText: { color: '#64748b', fontSize: '0.875rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 0.25rem 0' },
-    metricValue: { color: '#0ea5e9', fontSize: '1.5rem', fontWeight: '700', margin: 0 }
-  };
-
   return (
-    <div style={{ width: '100%', maxWidth: '1200px', margin: '0 auto', padding: '0.25rem 0.5rem 1.25rem' }}>
-      
-      <div style={headerStyles.headerRow}>
-        <h2 style={headerStyles.title}>Petty Cash</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <button
-            type="button"
-            onClick={handleDownloadReport}
-            style={{
-              border: '1px solid #bfdbfe',
-              background: '#eff6ff',
-              color: '#1d4ed8',
-              fontWeight: 700,
-              borderRadius: 10,
-              padding: '9px 14px',
-              cursor: 'pointer',
-            }}
-          >
+    <div className="max-w-6xl mx-auto">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <h2 className="text-2xl font-bold text-primary sm:text-[1.75rem]">Petty Cash</h2>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <button type="button" onClick={handleDownloadReport} className="btn-ui btn-ui-info">
+            <Download className="h-4 w-4" />
             Download Report
           </button>
-          <div style={headerStyles.metricCard}>
-            <p style={headerStyles.metricText}>Available Balance</p>
-            <p style={headerStyles.metricValue}>₹{balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+          <div className="rounded-2xl border border-slate-100 bg-white px-6 py-4 shadow-card">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted">Available Balance</p>
+            <p className="mt-0.5 text-2xl font-bold text-info tabular-nums">
+              ₹{balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Entry Form Container */}
-      <div style={{ background: 'linear-gradient(165deg, #ffffff, #f8fbff)', padding: '1.5rem', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '2rem', boxShadow: '0 12px 26px rgba(15,23,42,0.05)' }}>
-        <h3 style={{ marginTop: 0, fontSize: '1.1rem', marginBottom: '1rem', color: '#1e293b' }}>New Cash Entry</h3>
-        <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', alignItems: 'end' }}>
-          
+      <div className="card-ui mb-8 bg-gradient-to-br from-white to-sky-50/60 p-6">
+        <h3 className="mb-4 text-lg font-semibold text-primary">New Cash Entry</h3>
+        <form onSubmit={handleSubmit} className="grid items-end gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: '#475569', fontWeight: 500 }}>Type</label>
-            <select name="type" value={formData.type} onChange={handleInputChange} style={{ width: '100%', padding: '0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#fff' }}>
+            <label className="label-ui" htmlFor="pc-type">Type</label>
+            <select id="pc-type" name="type" value={formData.type} onChange={handleInputChange} className="input-ui bg-white">
               <option value="OUT">Cash Out (Expense)</option>
               <option value="IN">Cash In (Withdrawal)</option>
             </select>
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: '#475569', fontWeight: 500 }}>Date</label>
-            <input type="date" name="date" value={formData.date} onChange={handleInputChange} required style={{ width: '100%', padding: '0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+            <label className="label-ui" htmlFor="pc-date">Date</label>
+            <input id="pc-date" type="date" name="date" value={formData.date} onChange={handleInputChange} required className="input-ui" />
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: '#475569', fontWeight: 500 }}>Amount (₹)</label>
-            <input type="number" name="amount" value={formData.amount} onChange={handleInputChange} required min="1" placeholder="e.g. 500" style={{ width: '100%', padding: '0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+            <label className="label-ui" htmlFor="pc-amount">Amount (₹)</label>
+            <input id="pc-amount" type="number" name="amount" value={formData.amount} onChange={handleInputChange} required min="1" placeholder="e.g. 500" className="input-ui" />
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: '#475569', fontWeight: 500 }}>Description</label>
-            <input type="text" name="description" value={formData.description} onChange={handleInputChange} required placeholder="e.g. Office snacks" style={{ width: '100%', padding: '0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+            <label className="label-ui" htmlFor="pc-description">Description</label>
+            <input id="pc-description" type="text" name="description" value={formData.description} onChange={handleInputChange} required placeholder="e.g. Office snacks" className="input-ui" />
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: '#475569', fontWeight: 500 }}>Category (Optional)</label>
-            <input type="text" name="category" value={formData.category} onChange={handleInputChange} placeholder="Leave blank for AI" style={{ width: '100%', padding: '0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+            <label className="label-ui" htmlFor="pc-category">Category (Optional)</label>
+            <input id="pc-category" type="text" name="category" value={formData.category} onChange={handleInputChange} placeholder="Leave blank for AI" className="input-ui" />
           </div>
 
-          <button type="submit" disabled={saving} style={{ padding: '0.65rem 1.25rem', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, height: '42px' }}>
+          <button type="submit" disabled={saving} className="btn-ui btn-ui-primary h-[42px]">
             {saving ? 'Saving...' : 'Log Entry'}
           </button>
         </form>
       </div>
 
-      {/* Ledger Table */}
-      <div style={{ backgroundColor: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', overflowX: 'auto', boxShadow: '0 12px 26px rgba(15,23,42,0.05)' }}>
+      <div className="scroll-ui overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
         {loading ? (
-          <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Loading ledger entries...</div>
+          <TableSkeleton />
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+          <table className="table-ui">
+            <thead>
               <tr>
-                <th style={{ padding: '0.85rem 1rem', color: '#475569', fontWeight: 600 }}>Date</th>
-                <th style={{ padding: '0.85rem 1rem', color: '#475569', fontWeight: 600 }}>Description</th>
-                <th style={{ padding: '0.85rem 1rem', color: '#475569', fontWeight: 600 }}>Category</th>
-                <th style={{ padding: '0.85rem 1rem', color: '#475569', fontWeight: 600 }}>Cash In</th>
-                <th style={{ padding: '0.85rem 1rem', color: '#475569', fontWeight: 600 }}>Cash Out</th>
-                <th style={{ padding: '0.85rem 1rem', color: '#475569', fontWeight: 600 }}>Status</th>
-                <th style={{ padding: '0.85rem 1rem', color: '#475569', fontWeight: 600 }}>Actions</th>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Category</th>
+                <th>Cash In</th>
+                <th>Cash Out</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {entries.map((entry) => (
-                <tr key={entry.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                  <td style={{ padding: '0.85rem 1rem', whiteSpace: 'nowrap' }}>{entry.entry_date}</td>
-                  <td style={{ padding: '0.85rem 1rem' }}>{entry.description}</td>
-                  <td style={{ padding: '0.85rem 1rem' }}>
-                    <span style={{ 
-                      backgroundColor: entry.auto_categorized ? '#eff6ff' : '#f1f5f9', 
-                      color: entry.auto_categorized ? '#1d4ed8' : '#334155',
-                      padding: '0.25rem 0.5rem', 
-                      borderRadius: '4px', 
-                      fontSize: '0.85rem',
-                      fontWeight: 500
-                    }}>
-                      {entry.category} {entry.auto_categorized ? '✨ (AI)' : ''}
+                <tr key={entry.id}>
+                  <td className="whitespace-nowrap">{entry.entry_date}</td>
+                  <td>{entry.description}</td>
+                  <td>
+                    <span className={`badge-ui ${entry.auto_categorized ? 'badge-ui-info' : 'badge-ui-neutral'}`}>
+                      {entry.category} {entry.auto_categorized ? <Sparkles className="h-3 w-3" aria-hidden="true" /> : ''}
                     </span>
                   </td>
-                  <td style={{ padding: '0.85rem 1rem', color: '#16a34a', fontWeight: 600 }}>
+                  <td className="font-semibold text-success tabular-nums">
                     {parseFloat(entry.cash_in) > 0 ? `₹${parseFloat(entry.cash_in).toLocaleString('en-IN')}` : '-'}
                   </td>
-                  <td style={{ padding: '0.85rem 1rem', color: '#dc2626', fontWeight: 600 }}>
+                  <td className="font-semibold text-danger tabular-nums">
                     {parseFloat(entry.cash_out) > 0 ? `₹${parseFloat(entry.cash_out).toLocaleString('en-IN')}` : '-'}
                   </td>
-                  <td style={{ padding: '0.85rem 1rem' }}>
-                    <span
-                      style={{
-                        backgroundColor: String(entry.status || 'pending') === 'approved' ? '#dcfce7' : '#fef3c7',
-                        color: String(entry.status || 'pending') === 'approved' ? '#166534' : '#92400e',
-                        padding: '0.25rem 0.5rem',
-                        borderRadius: '4px',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        textTransform: 'capitalize',
-                      }}
-                    >
+                  <td>
+                    <span className={`badge-ui ${String(entry.status || 'pending') === 'approved' ? 'badge-ui-success' : 'badge-ui-warning'}`}>
                       {String(entry.status || 'pending')}
                     </span>
                   </td>
-                  <td style={{ padding: '0.85rem 1rem' }}>
+                  <td>
                     {String(entry.status || 'pending') === 'pending' && isAdmin ? (
                       <button
                         type="button"
                         onClick={() => handleApproveEntry(entry.id)}
                         disabled={approvingId === entry.id}
-                        style={{
-                          border: 'none',
-                          borderRadius: 8,
-                          padding: '8px 12px',
-                          fontWeight: 700,
-                          cursor: approvingId === entry.id ? 'not-allowed' : 'pointer',
-                          background: approvingId === entry.id ? '#94a3b8' : '#2563eb',
-                          color: '#fff',
-                        }}
+                        className="btn-ui btn-ui-sm btn-ui-secondary"
                       >
                         {approvingId === entry.id ? 'Approving...' : 'Approve'}
                       </button>
                     ) : (
-                      <span style={{ color: '#64748b', fontSize: 13 }}>-</span>
+                      <span className="text-xs text-muted">-</span>
                     )}
                   </td>
                 </tr>
               ))}
               {entries.length === 0 && (
                 <tr>
-                  <td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
+                  <td colSpan="7" className="py-10 text-center text-muted">
                     No cash entries recorded yet.
                   </td>
                 </tr>
@@ -301,7 +272,6 @@ export default function PettyCash() {
           </table>
         )}
       </div>
-
     </div>
   );
 }

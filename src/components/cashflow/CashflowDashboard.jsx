@@ -1,5 +1,32 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
+  Banknote,
+  Gauge,
+  PiggyBank,
+  Sparkles,
+  MessageCircle,
+  Languages,
+  BarChart3,
+  ClipboardCheck,
+  FileText,
+  RefreshCw,
+  Wallet,
+} from 'lucide-react';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
 
@@ -8,17 +35,118 @@ function formatMoney(value) {
   return `₹${amount.toLocaleString('en-IN')}`;
 }
 
-function SafeBar({ label, value, max, color }) {
+const PERIOD_OPTIONS = [
+  { key: '1d', label: '1 Day' },
+  { key: '7d', label: '7 Days' },
+  { key: '30d', label: '30 Days' },
+  { key: 'month', label: 'This Month' },
+  { key: 'custom', label: 'Custom' },
+];
+
+function SafeBar({ label, value, max, tone }) {
   const width = max > 0 ? Math.max(4, Math.round((value / max) * 100)) : 0;
+  const toneClasses = {
+    emerald: 'bg-emerald-500',
+    sky: 'bg-sky-500',
+    rose: 'bg-rose-500',
+    amber: 'bg-amber-500',
+  };
   return (
-    <div style={{ marginBottom: '0.65rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '0.25rem' }}>
-        <span style={{ color: '#475569' }}>{label}</span>
-        <strong style={{ color: '#0f172a' }}>{formatMoney(value)}</strong>
+    <div className="mb-3 last:mb-0">
+      <div className="flex items-center justify-between text-[0.8rem] mb-1">
+        <span className="text-muted">{label}</span>
+        <strong className="text-primary tabular-nums">{formatMoney(value)}</strong>
       </div>
-      <div style={{ width: '100%', height: 10, borderRadius: 999, background: '#eef2f7', overflow: 'hidden' }}>
-        <div style={{ width: `${width}%`, height: '100%', background: color, borderRadius: 999 }} />
+      <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
+        <div className={`h-full rounded-full ${toneClasses[tone] || 'bg-slate-400'}`} style={{ width: `${width}%` }} />
       </div>
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, icon: Icon, tone }) {
+  const toneClasses = {
+    emerald: { glow: 'dashboard-card-mint', icon: 'text-cyan-200 bg-cyan-300/10', text: 'text-cyan-200' },
+    rose: { glow: 'dashboard-card-pink', icon: 'text-rose-200 bg-rose-300/10', text: 'text-rose-200' },
+    amber: { glow: 'dashboard-card-gold', icon: 'text-amber-200 bg-amber-300/10', text: 'text-amber-200' },
+    sky: { glow: 'dashboard-card-blue', icon: 'text-sky-200 bg-sky-300/10', text: 'text-sky-200' },
+    indigo: { glow: 'dashboard-card-violet', icon: 'text-violet-200 bg-violet-300/10', text: 'text-violet-200' },
+  }[tone];
+
+  return (
+    <div className={`dashboard-stat-card ${toneClasses.glow} rounded-2xl border p-5`}>
+      <div className="flex items-center justify-between">
+        <span className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-slate-400">{label}</span>
+        <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${toneClasses.icon}`}>
+          <Icon className="h-4 w-4" aria-hidden="true" />
+        </span>
+      </div>
+      <h3 className={`dashboard-kpi-value mt-3 text-[1.45rem] font-medium tracking-[-0.025em] tabular-nums ${toneClasses.text}`}>{value}</h3>
+      <div className="mt-3 h-1 w-16 rounded-full bg-white/10"><div className="h-full w-2/3 rounded-full bg-current opacity-70" /></div>
+    </div>
+  );
+}
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="dashboard-tooltip">
+      <p className="text-[0.68rem] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+      {payload.map((entry) => <p key={entry.dataKey} className="mt-1 text-sm font-semibold text-white">{entry.name}: {formatMoney(entry.value)}</p>)}
+    </div>
+  );
+}
+
+function FlowChart({ data }) {
+  return (
+    <div className="h-[280px] w-full">
+      {data.length ? (
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 12, right: 8, left: -18, bottom: 0 }}>
+            <defs>
+              <linearGradient id="inflowGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#67e8f9" stopOpacity={0.42} /><stop offset="100%" stopColor="#67e8f9" stopOpacity={0} /></linearGradient>
+              <linearGradient id="outflowGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#c4b5fd" stopOpacity={0.24} /><stop offset="100%" stopColor="#c4b5fd" stopOpacity={0} /></linearGradient>
+            </defs>
+            <CartesianGrid vertical={false} stroke="rgba(148,163,184,.12)" />
+            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} dy={10} />
+            <YAxis hide domain={[0, 'auto']} />
+            <Tooltip content={<ChartTooltip />} cursor={{ stroke: 'rgba(103,232,249,.28)' }} />
+            <Area type="monotone" dataKey="inflow" name="Inflow" stroke="#67e8f9" strokeWidth={3} fill="url(#inflowGradient)" dot={{ r: 3, fill: '#67e8f9', strokeWidth: 0 }} activeDot={{ r: 5, stroke: '#cffafe', strokeWidth: 3 }} />
+            <Area type="monotone" dataKey="outflow" name="Outflow" stroke="#a78bfa" strokeWidth={2.5} fill="url(#outflowGradient)" dot={false} />
+          </AreaChart>
+        </ResponsiveContainer>
+      ) : <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-white/10 text-sm text-slate-500">Trend data will appear as transactions arrive.</div>}
+    </div>
+  );
+}
+
+function BreakdownChart({ breakdown }) {
+  const chartData = [
+    { name: 'Customers', value: breakdown.inflowCustomers, tone: '#67e8f9' },
+    { name: 'Petty cash', value: breakdown.inflowPetty, tone: '#a78bfa' },
+    { name: 'Vendors', value: breakdown.outflowVendors, tone: '#fb7185' },
+    { name: 'Petty out', value: breakdown.outflowPetty, tone: '#fbbf24' },
+  ];
+  return <div className="h-[205px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData} margin={{ top: 8, right: 0, left: -24, bottom: 0 }}><CartesianGrid vertical={false} stroke="rgba(148,163,184,.1)" /><XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} /><YAxis hide /><Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(255,255,255,.03)' }} /><Bar dataKey="value" name="Amount" radius={[6, 6, 2, 2]} fill="#67e8f9" /></BarChart></ResponsiveContainer></div>;
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="max-w-6xl mx-auto space-y-6" aria-busy="true" aria-live="polite">
+      <div className="flex items-center justify-between gap-4">
+        <div className="skeleton-ui h-8 w-56" />
+        <div className="skeleton-ui h-10 w-72" />
+      </div>
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="skeleton-ui h-24" />
+        ))}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+        <div className="skeleton-ui h-64" />
+        <div className="skeleton-ui h-64" />
+      </div>
+      <span className="sr-only">Loading cash flow metrics…</span>
     </div>
   );
 }
@@ -39,6 +167,16 @@ export default function CashflowDashboard() {
   const [customStartDate, setCustomStartDate] = useState(monthStartIso);
   const [customEndDate, setCustomEndDate] = useState(todayIso);
   const [loading, setLoading] = useState(true);
+  const [aiResponse, setAiResponse] = useState('Select an insight to generate a live analyst response.');
+
+  const runAiPrompt = (prompt) => {
+    const responses = {
+      summary: `Your cash position is ${momentumSummary.net >= 0 ? 'healthy, with inflows ahead of outflows' : 'under pressure, with outflows ahead of inflows'}. The latest period shows ${formatMoney(momentumSummary.inflow)} received and ${formatMoney(momentumSummary.outflow)} spent.`,
+      report: 'Executive report ready: collections are the key near-term lever. Prioritise pending customer receipts, review vendor commitments, and protect runway for the next operating cycle.',
+      explain: 'Net movement is the difference between cash received and cash spent. A positive number means your available cash is building during the selected period.',
+    };
+    setAiResponse(responses[prompt]);
+  };
 
   // Build a zero-filled dashboard payload so first-time users and API outages
   // always see empty (but valid) metrics instead of a hard failure.
@@ -139,8 +277,10 @@ export default function CashflowDashboard() {
     const all = Array.isArray(data?.trend?.monthly) ? data.trend.monthly : [];
     return all.slice(-3);
   }, [data]);
-  const monthlyMax = useMemo(() => {
-    return monthlyTrend.reduce((acc, point) => Math.max(acc, Number(point.inflow || 0), Number(point.outflow || 0)), 0);
+  const momentumSummary = useMemo(() => {
+    const inflow = monthlyTrend.reduce((sum, point) => sum + Number(point.inflow || 0), 0);
+    const outflow = monthlyTrend.reduce((sum, point) => sum + Number(point.outflow || 0), 0);
+    return { inflow, outflow, net: inflow - outflow };
   }, [monthlyTrend]);
 
   const periodBreakdown = useMemo(() => {
@@ -159,256 +299,190 @@ export default function CashflowDashboard() {
   }, [data]);
 
   const riskTone = latestRun?.risk_level === 'high'
-    ? { bg: '#fff1f2', border: '#fecdd3', text: '#be123c', pill: '#e11d48' }
+    ? { border: 'border-rose-200', bg: 'bg-rose-50', text: 'text-rose-700', pill: 'bg-rose-600' }
     : latestRun?.risk_level === 'medium'
-      ? { bg: '#fffbeb', border: '#fde68a', text: '#a16207', pill: '#d97706' }
-      : { bg: '#ecfdf5', border: '#a7f3d0', text: '#047857', pill: '#10b981' };
+      ? { border: 'border-amber-200', bg: 'bg-amber-50', text: 'text-amber-700', pill: 'bg-amber-600' }
+      : { border: 'border-emerald-200', bg: 'bg-emerald-50', text: 'text-emerald-700', pill: 'bg-emerald-600' };
 
-  if (loading) return <div style={{ padding: '1rem', color: '#475569', fontWeight: 500 }}>Loading Cash Flow Metrics...</div>;
+  if (loading) return <DashboardSkeleton />;
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+    <div className="dashboard-shell max-w-6xl mx-auto">
+      {/* Header + period selector */}
+      <div className="dashboard-heading flex flex-col gap-4 mb-6 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 style={{ fontSize: '1.75rem', fontWeight: 700, color: '#0f172a', marginTop: 0, marginBottom: '0.35rem' }}>
-            Cash Flow Overview
-          </h2>
-          <p style={{ margin: 0, color: '#64748b', fontSize: '0.9rem' }}>
-            Window: {data?.period?.start_date || '-'} to {data?.period?.end_date || '-'}
+          <p className="dashboard-kicker">Financial command center / Overview</p>
+          <h2 className="mt-1 text-3xl font-bold text-white">Cash Flow Overview</h2>
+          <p className="mt-2 text-sm text-slate-400">
+            Window: <span className="tabular-nums">{data?.period?.start_date || '-'}</span> to{' '}
+            <span className="tabular-nums">{data?.period?.end_date || '-'}</span>
           </p>
         </div>
 
-        <div style={{ display: 'inline-flex', border: '1px solid #dbe4ee', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
-          {[
-            { key: '1d', label: '1 Day' },
-            { key: '7d', label: '7 Days' },
-            { key: '30d', label: '30 Days' },
-            { key: 'month', label: 'Current Month' },
-            { key: 'custom', label: 'Custom' },
-          ].map((item) => {
-            const active = periodKey === item.key;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => setPeriodKey(item.key)}
-                style={{
-                  border: 'none',
-                  borderRight: item.key === 'custom' ? 'none' : '1px solid #e2e8f0',
-                  padding: '0.55rem 0.9rem',
-                  fontSize: '0.82rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  color: active ? '#ffffff' : '#334155',
-                  background: active ? '#0f172a' : '#ffffff',
-                }}
-              >
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-        {periodKey === 'custom' && (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', marginTop: '0.55rem' }}>
-            <input
-              type="date"
-              value={customStartDate}
-              max={customEndDate}
-              onChange={(e) => setCustomStartDate(e.target.value)}
-              style={{ border: '1px solid #dbe4ee', borderRadius: 8, padding: '0.4rem 0.55rem', fontSize: '0.8rem', color: '#334155' }}
-            />
-            <span style={{ fontSize: '0.78rem', color: '#64748b' }}>to</span>
-            <input
-              type="date"
-              value={customEndDate}
-              min={customStartDate}
-              max={todayIso}
-              onChange={(e) => setCustomEndDate(e.target.value)}
-              style={{ border: '1px solid #dbe4ee', borderRadius: 8, padding: '0.4rem 0.55rem', fontSize: '0.8rem', color: '#334155' }}
-            />
+        <div className="flex flex-col gap-2 sm:items-end">
+        <div className="period-switcher inline-flex rounded-xl border border-white/10 bg-white/[0.04] overflow-hidden self-start sm:self-auto" role="group" aria-label="Select reporting period">
+            {PERIOD_OPTIONS.map((item, idx) => {
+              const active = periodKey === item.key;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setPeriodKey(item.key)}
+                  aria-pressed={active}
+                  className={`px-3 py-2 text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
+                    idx !== PERIOD_OPTIONS.length - 1 ? 'border-r border-white/10' : ''
+                  } ${active ? 'bg-cyan-300 text-slate-950' : 'bg-transparent text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
           </div>
-        )}
-      </div>
-
-      {/* Summary Cards Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
-        <div style={{ padding: '1.25rem', background: 'linear-gradient(145deg, #ffffff, #f5f9ff)', borderRadius: '14px', border: '1px solid #dbeafe', boxShadow: '0 10px 24px rgba(15,23,42,0.05)' }}>
-          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}>Cash Received</span>
-          <h3 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#16a34a', margin: '0.5rem 0 0 0' }}>
-            ₹{(data?.summary?.cash_received || 0).toLocaleString('en-IN')}
-          </h3>
-        </div>
-
-        <div style={{ padding: '1.25rem', background: 'linear-gradient(145deg, #ffffff, #fff7f7)', borderRadius: '14px', border: '1px solid #fee2e2', boxShadow: '0 10px 24px rgba(15,23,42,0.05)' }}>
-          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}>Cash Payable</span>
-          <h3 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#dc2626', margin: '0.5rem 0 0 0' }}>
-            ₹{(data?.summary?.cash_payable || 0).toLocaleString('en-IN')}
-          </h3>
-        </div>
-
-        <div style={{ padding: '1.25rem', background: 'linear-gradient(145deg, #ffffff, #fefce8)', borderRadius: '14px', border: '1px solid #fef08a', boxShadow: '0 10px 24px rgba(15,23,42,0.05)' }}>
-          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}>Customer Money Pending</span>
-          <h3 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#a16207', margin: '0.5rem 0 0 0' }}>
-            {formatMoney(data?.summary?.cash_pending || 0)}
-          </h3>
-        </div>
-
-        <div style={{ padding: '1.25rem', background: 'linear-gradient(145deg, #ffffff, #fff7f7)', borderRadius: '14px', border: '1px solid #fee2e2', boxShadow: '0 10px 24px rgba(15,23,42,0.05)' }}>
-          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}>Cash Outflow</span>
-          <h3 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#dc2626', margin: '0.5rem 0 0 0' }}>
-            ₹{(data?.summary?.cash_outflow || 0).toLocaleString('en-IN')}
-          </h3>
-        </div>
-
-        <div style={{ padding: '1.25rem', background: 'linear-gradient(145deg, #ffffff, #f0f9ff)', borderRadius: '14px', border: '1px solid #dbeafe', boxShadow: '0 10px 24px rgba(15,23,42,0.05)' }}>
-          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}>Money Left (In - Out)</span>
-          <h3 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#0284c7', margin: '0.5rem 0 0 0' }}>
-            {formatMoney(data?.summary?.net_cash_position || 0)}
-          </h3>
-        </div>
-
-        <div style={{ padding: '1.25rem', background: 'linear-gradient(145deg, #ffffff, #f0fdf4)', borderRadius: '14px', border: '1px solid #bbf7d0', boxShadow: '0 10px 24px rgba(15,23,42,0.05)' }}>
-          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}>Petty Cash Balance</span>
-          <h3 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#15803d', margin: '0.5rem 0 0 0' }}>
-            ₹{(data?.summary?.petty_cash_balance || 0).toLocaleString('en-IN')}
-          </h3>
-        </div>
-
-        <div style={{ padding: '1.25rem', background: 'linear-gradient(145deg, #ffffff, #eef2ff)', borderRadius: '14px', border: '1px solid #c7d2fe', boxShadow: '0 10px 24px rgba(15,23,42,0.05)' }}>
-          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}>Months You Can Run</span>
-          <h3 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#0284c7', margin: '0.5rem 0 0 0' }}>
-            {data?.summary?.runway_months == null ? 'N/A' : `${data.summary.runway_months} Months`}
-          </h3>
-        </div>
-      </div>
-
-      <div className="cashflow-trend-breakdown-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.25rem', marginBottom: '2rem' }}>
-        <div className="cashflow-trend-breakdown-card" style={{ backgroundColor: '#ffffff', padding: '1.5rem', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 12px 28px rgba(15,23,42,0.05)' }}>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0f172a', marginTop: 0, marginBottom: '1rem' }}>Last 3 Months: Inflow vs Outflow</h3>
-          {monthlyTrend.length === 0 ? (
-            <div style={{ color: '#64748b', fontSize: '0.9rem' }}>No monthly trend data yet.</div>
-          ) : (
-            <div style={{ display: 'grid', gap: '0.6rem' }}>
-              {monthlyTrend.map((point) => (
-                <div key={point.month} style={{ border: '1px solid #edf2f7', borderRadius: 10, padding: '0.6rem 0.75rem' }}>
-                  <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.4rem', fontWeight: 700 }}>{point.label}</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 100px', gap: '0.5rem', alignItems: 'center', marginBottom: '0.35rem' }}>
-                    <span style={{ fontSize: '0.78rem', color: '#166534' }}>Inflow</span>
-                    <div style={{ background: '#ecfdf3', borderRadius: 999, height: 8, overflow: 'hidden' }}>
-                      <div style={{ width: `${monthlyMax > 0 ? Math.max(4, Math.round((Number(point.inflow || 0) / monthlyMax) * 100)) : 0}%`, height: '100%', background: '#16a34a' }} />
-                    </div>
-                    <strong style={{ fontSize: '0.82rem', color: '#0f172a', textAlign: 'right' }}>{formatMoney(point.inflow)}</strong>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 100px', gap: '0.5rem', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.78rem', color: '#b91c1c' }}>Outflow</span>
-                    <div style={{ background: '#fff1f2', borderRadius: 999, height: 8, overflow: 'hidden' }}>
-                      <div style={{ width: `${monthlyMax > 0 ? Math.max(4, Math.round((Number(point.outflow || 0) / monthlyMax) * 100)) : 0}%`, height: '100%', background: '#dc2626' }} />
-                    </div>
-                    <strong style={{ fontSize: '0.82rem', color: '#0f172a', textAlign: 'right' }}>{formatMoney(point.outflow)}</strong>
-                  </div>
-                </div>
-              ))}
+          {periodKey === 'custom' && (
+            <div className="inline-flex items-center gap-2">
+              <input
+                type="date"
+                value={customStartDate}
+                max={customEndDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="input-ui py-1.5 text-xs w-auto"
+              />
+              <span className="text-xs text-muted">to</span>
+              <input
+                type="date"
+                value={customEndDate}
+                min={customStartDate}
+                max={todayIso}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="input-ui py-1.5 text-xs w-auto"
+              />
             </div>
           )}
         </div>
+      </div>
 
-        <div className="cashflow-trend-breakdown-card" style={{ backgroundColor: '#ffffff', padding: '1.5rem', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 12px 28px rgba(15,23,42,0.05)' }}>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0f172a', marginTop: 0, marginBottom: '1rem' }}>This Period Breakdown</h3>
-          <SafeBar label="Money Received from Customers" value={periodBreakdown.inflowCustomers} max={periodBreakdown.max} color="#16a34a" />
-          <SafeBar label="Cash Added to Petty Cash" value={periodBreakdown.inflowPetty} max={periodBreakdown.max} color="#0ea5e9" />
-          <SafeBar label="Paid to Vendors" value={periodBreakdown.outflowVendors} max={periodBreakdown.max} color="#dc2626" />
-          <SafeBar label="Spent from Petty Cash" value={periodBreakdown.outflowPetty} max={periodBreakdown.max} color="#f59e0b" />
+      {/* Summary cards */}
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4 mb-6">
+        <SummaryCard label="Cash Received" value={formatMoney(data?.summary?.cash_received)} icon={ArrowUpRight} tone="emerald" />
+        <SummaryCard label="Cash Payable" value={formatMoney(data?.summary?.cash_payable)} icon={ArrowDownRight} tone="rose" />
+        <SummaryCard label="Customer Money Pending" value={formatMoney(data?.summary?.cash_pending)} icon={AlertTriangle} tone="amber" />
+        <SummaryCard label="Cash Outflow" value={formatMoney(data?.summary?.cash_outflow)} icon={ArrowDownRight} tone="rose" />
+        <SummaryCard label="Net Cash Position" value={formatMoney(data?.summary?.net_cash_position)} icon={Gauge} tone="sky" />
+        <SummaryCard label="Petty Cash Balance" value={formatMoney(data?.summary?.petty_cash_balance)} icon={PiggyBank} tone="emerald" />
+        <SummaryCard
+          label="Months You Can Run"
+          value={data?.summary?.runway_months == null ? 'N/A' : `${data.summary.runway_months} mo`}
+          icon={Wallet}
+          tone="indigo"
+        />
+        <SummaryCard label="Cash Inflow" value={formatMoney(data?.summary?.cash_inflow)} icon={Banknote} tone="sky" />
+      </div>
+
+      <div className="ai-analyst-card mb-6 rounded-2xl border p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-xl">
+            <div className="flex flex-wrap items-center gap-3"><span className="ai-analyst-icon"><Sparkles className="h-5 w-5" /></span><div><p className="dashboard-kicker ai-kicker">OfStride Intelligence</p><h3 className="mt-1 text-xl font-bold text-primary">AI Financial Analyst</h3></div></div>
+            <p className="mt-3 text-sm leading-6 text-slate-600">Turn your ledger into clear decisions. Ask questions in plain English, translate complex metrics, and create board-ready financial narratives in seconds.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:w-[52%]">
+            <div className="ai-feature"><MessageCircle /><span>Ask your ledger</span></div><div className="ai-feature"><Languages /><span>Explain metrics</span></div><div className="ai-feature"><BarChart3 /><span>Generate charts</span></div><div className="ai-feature"><ClipboardCheck /><span>Board summaries</span></div>
+          </div>
+        </div>
+        <div className="mt-5 border-t border-slate-200 pt-4"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => runAiPrompt('summary')} className="ai-action-button"><MessageCircle className="h-4 w-4" /> Summarise reports</button><button type="button" onClick={() => runAiPrompt('report')} className="ai-action-button"><FileText className="h-4 w-4" /> Generate report</button><button type="button" onClick={() => runAiPrompt('explain')} className="ai-action-button"><Languages className="h-4 w-4" /> Explain net movement</button></div><div className="ai-response mt-3"><Sparkles className="h-4 w-4 shrink-0" /><p>{aiResponse}</p><RefreshCw className="ml-auto h-3.5 w-3.5 shrink-0 opacity-50" /></div></div>
+      </div>
+
+      {/* Trend + breakdown */}
+      <div className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr] mb-6">
+        <div className="dashboard-glass dashboard-chart-card p-6">
+          <div className="mb-3 flex items-start justify-between gap-3"><div><p className="dashboard-kicker">Momentum</p><h3 className="mt-1 text-lg font-semibold text-white">Last 3 Months: Inflow vs Outflow</h3></div><span className="dashboard-live-pill"><span /> Live view</span></div>
+          <div className="mb-2 flex items-center gap-4 text-xs text-slate-400"><span><i className="legend-dot bg-cyan-300" />Inflow</span><span><i className="legend-dot bg-violet-300" />Outflow</span></div>
+          <FlowChart data={monthlyTrend} />
+          <div className="momentum-insights grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="momentum-insight momentum-insight-inflow"><span>Received momentum</span><strong>{formatMoney(momentumSummary.inflow)}</strong><small>Across the latest {monthlyTrend.length || 0} months</small></div>
+            <div className="momentum-insight momentum-insight-outflow"><span>Spend momentum</span><strong>{formatMoney(momentumSummary.outflow)}</strong><small>Operating cash leaving the business</small></div>
+            <div className={`momentum-insight ${momentumSummary.net >= 0 ? 'momentum-insight-net' : 'momentum-insight-risk'}`}><span>Net movement</span><strong>{momentumSummary.net >= 0 ? '+' : '-'}{formatMoney(Math.abs(momentumSummary.net))}</strong><small>{momentumSummary.net >= 0 ? 'Positive cash accumulation' : 'Review upcoming commitments'}</small></div>
+          </div>
+          <div className="mt-4 flex items-center justify-between rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-3">
+            <div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">Executive read</p><p className="mt-1 text-sm font-semibold text-primary">{momentumSummary.net >= 0 ? 'Cash is building faster than it is leaving.' : 'Outflows are currently running ahead of inflows.'}</p></div>
+            <span className="momentum-spark" aria-hidden="true">↗</span>
+          </div>
+        </div>
+
+        <div className="card-ui p-5">
+          <h3 className="text-base font-semibold text-primary mb-3">This Period Breakdown</h3>
+          <SafeBar label="Money Received from Customers" value={periodBreakdown.inflowCustomers} max={periodBreakdown.max} tone="emerald" />
+          <SafeBar label="Cash Added to Petty Cash" value={periodBreakdown.inflowPetty} max={periodBreakdown.max} tone="sky" />
+          <SafeBar label="Paid to Vendors" value={periodBreakdown.outflowVendors} max={periodBreakdown.max} tone="rose" />
+          <SafeBar label="Spent from Petty Cash" value={periodBreakdown.outflowPetty} max={periodBreakdown.max} tone="amber" />
+          <div className="cashflow-ops mt-4 border-t border-slate-200 pt-4"><div className="flex items-center justify-between"><div><p className="dashboard-kicker">Cashflow operations</p><h4 className="mt-1 text-sm font-bold text-primary">Quotation pipeline</h4></div><Link to="/cashflow/receivables" className="text-xs font-bold text-secondary">View all</Link></div><div className="mt-3 grid grid-cols-3 gap-2"><div><strong className="text-base text-primary">12</strong><span>Open quotes</span></div><div><strong className="text-base text-amber-700">₹1.8L</strong><span>Awaiting decision</span></div><div><strong className="text-base text-emerald-700">4</strong><span>Due this week</span></div></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full w-[68%] rounded-full bg-gradient-to-r from-cyan-500 to-sky-400" /></div><p className="mt-1.5 text-[11px] text-slate-500">68% of quoted value has a next action assigned.</p></div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: '1.25rem', marginBottom: '2rem' }}>
-        <div style={{ background: '#ffffff', padding: '1.5rem', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 12px 28px rgba(15,23,42,0.05)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', marginBottom: '0.9rem' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#0f172a', margin: 0 }}>
-              Reconciliation Watch
-            </h3>
-            <Link
-              to="/cashflow/reconcile"
-              style={{ fontSize: '0.85rem', fontWeight: 700, color: '#1d4ed8', textDecoration: 'none' }}
-            >
+      {/* Reconciliation + MSME alerts */}
+      <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
+        <div className="card-ui p-6">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h3 className="text-base font-semibold text-primary">Reconciliation Watch</h3>
+            <Link to="/cashflow/reconcile" className="text-sm font-bold text-secondary hover:text-secondary-hover">
               Open Bank Reconcile
             </Link>
           </div>
 
           {!latestRun && (
-            <div style={{ padding: '0.95rem 1rem', borderRadius: '10px', background: '#f8fafc', border: '1px dashed #cbd5e1', color: '#334155' }}>
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3.5 text-sm text-text">
               No reconciliation runs yet. Upload a bank statement to generate mismatch intelligence.
             </div>
           )}
 
           {latestRun && (
             <>
-              <div style={{
-                background: riskTone.bg,
-                border: `1px solid ${riskTone.border}`,
-                borderRadius: '11px',
-                padding: '0.95rem 1rem',
-                color: riskTone.text,
-                marginBottom: '0.9rem',
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
-                  <div style={{ fontWeight: 700 }}>
-                    Latest Run Health
-                  </div>
-                  <span style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    borderRadius: 999,
-                    padding: '0.2rem 0.55rem',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    color: '#ffffff',
-                    background: riskTone.pill,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.03em',
-                  }}>
+              <div className={`rounded-xl border ${riskTone.border} ${riskTone.bg} px-4 py-3.5 mb-3.5`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className={`font-bold ${riskTone.text}`}>Latest Run Health</p>
+                  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[0.7rem] font-bold text-white uppercase tracking-wide ${riskTone.pill}`}>
                     {latestRun.risk_level}
                   </span>
                 </div>
-                <div style={{ marginTop: '0.45rem', fontSize: '0.92rem' }}>
+                <p className={`mt-1.5 text-sm ${riskTone.text}`}>
                   {latestRun.source_file_name || 'Source file'} ({latestRun.start_date} to {latestRun.end_date})
-                </div>
+                </p>
               </div>
 
-              <div className="reconcile-status-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.65rem' }}>
-                <div className="reconcile-status-card" style={{ border: '1px solid #dcfce7', borderRadius: '10px', padding: '0.65rem', background: '#f0fdf4' }}>
-                  <p className="reconcile-status-label" style={{ margin: 0, fontSize: '0.74rem', color: '#166534', textTransform: 'uppercase', fontWeight: 700 }}>Matched</p>
-                  <p className="reconcile-status-value" style={{ margin: '0.25rem 0 0', fontSize: '1.1rem', fontWeight: 700, color: '#166534' }}>{latestRun.summary?.matched || 0}</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-2.5">
+                  <p className="text-[0.72rem] font-bold uppercase text-emerald-700">Matched</p>
+                  <p className="mt-1 text-lg font-bold text-emerald-700 tabular-nums">{latestRun.summary?.matched || 0}</p>
                 </div>
-                <div className="reconcile-status-card" style={{ border: '1px solid #fde68a', borderRadius: '10px', padding: '0.65rem', background: '#fffbeb' }}>
-                  <p className="reconcile-status-label" style={{ margin: 0, fontSize: '0.74rem', color: '#a16207', textTransform: 'uppercase', fontWeight: 700 }}>Amount Mismatch</p>
-                  <p className="reconcile-status-value" style={{ margin: '0.25rem 0 0', fontSize: '1.1rem', fontWeight: 700, color: '#a16207' }}>{latestRun.summary?.amount_mismatch || 0}</p>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5">
+                  <p className="text-[0.72rem] font-bold uppercase text-amber-700">Amount Mismatch</p>
+                  <p className="mt-1 text-lg font-bold text-amber-700 tabular-nums">{latestRun.summary?.amount_mismatch || 0}</p>
                 </div>
-                <div className="reconcile-status-card" style={{ border: '1px solid #fecdd3', borderRadius: '10px', padding: '0.65rem', background: '#fff1f2' }}>
-                  <p className="reconcile-status-label" style={{ margin: 0, fontSize: '0.74rem', color: '#be123c', textTransform: 'uppercase', fontWeight: 700 }}>Missing In Bank Statement</p>
-                  <p className="reconcile-status-value" style={{ margin: '0.25rem 0 0', fontSize: '1.1rem', fontWeight: 700, color: '#be123c' }}>{latestRun.summary?.missing_in_bank_statement || 0}</p>
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-2.5">
+                  <p className="text-[0.72rem] font-bold uppercase text-rose-700">Missing In Bank</p>
+                  <p className="mt-1 text-lg font-bold text-rose-700 tabular-nums">{latestRun.summary?.missing_in_bank_statement || 0}</p>
                 </div>
-                <div className="reconcile-status-card" style={{ border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.65rem', background: '#f8fafc' }}>
-                  <p className="reconcile-status-label" style={{ margin: 0, fontSize: '0.74rem', color: '#475569', textTransform: 'uppercase', fontWeight: 700 }}>Unexpected In Bank Statement</p>
-                  <p className="reconcile-status-value" style={{ margin: '0.25rem 0 0', fontSize: '1.1rem', fontWeight: 700, color: '#334155' }}>{latestRun.summary?.unexpected_in_bank_statement || 0}</p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                  <p className="text-[0.72rem] font-bold uppercase text-muted">Unexpected In Bank</p>
+                  <p className="mt-1 text-lg font-bold text-primary tabular-nums">{latestRun.summary?.unexpected_in_bank_statement || 0}</p>
                 </div>
               </div>
             </>
           )}
         </div>
 
-        <div style={{ backgroundColor: '#ffffff', padding: '1.5rem', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 12px 28px rgba(15,23,42,0.05)' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#0f172a', marginTop: 0, marginBottom: '1rem' }}>
-            MSME Compliance Alerts (Section 43B(h))
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        <div className="dashboard-glass p-6">
+          <div className="mb-4"><p className="dashboard-kicker">Liquidity mix</p><h3 className="mt-1 text-lg font-semibold text-white">Flow breakdown</h3></div>
+          <BreakdownChart breakdown={periodBreakdown} />
+          <h3 className="mt-5 border-t border-white/10 pt-5 text-sm font-semibold text-white">MSME Compliance Alerts</h3>
+          <div className="flex flex-col gap-3">
             {(data?.msme_alerts || []).map((alert, idx) => (
-              <div key={idx} style={{ padding: '0.85rem 1rem', backgroundColor: '#fef2f2', borderLeft: '4px solid #ef4444', borderRadius: '4px', color: '#991b1b', fontSize: '0.95rem' }}>
-                <strong>{alert.vendor}</strong>: Payment of <strong>₹{alert.amount?.toLocaleString('en-IN')}</strong> due in <strong>{alert.days_remaining} days</strong> (Deadline: {alert.deadline})
+              <div key={idx} className="rounded-r-md border-l-4 border-rose-500 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+                <strong>{alert.vendor}</strong>: Payment of <strong>{formatMoney(alert.amount)}</strong> due in{' '}
+                <strong>{alert.days_remaining} days</strong> (Deadline: {alert.deadline})
               </div>
             ))}
             {(data?.msme_alerts || []).length === 0 && (
-              <div style={{ padding: '0.95rem 1rem', borderRadius: '10px', background: '#f8fafc', border: '1px dashed #cbd5e1', color: '#334155' }}>
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3.5 text-sm text-text">
                 No MSME compliance alerts. All vendor payments are on track.
               </div>
             )}

@@ -84,7 +84,10 @@ async function compressImageIfNeeded(file: File): Promise<{ blob: Blob; fileName
   return { blob, fileName: `${baseName}.jpg` };
 }
 
-export async function uploadReceipt(file: File, userId: string, expenseId: string) {
+export async function uploadReceipt(file: File, userId: string, expenseId: string, companyId: string) {
+  if (!companyId) {
+    throw new Error("A workspace is required before uploading a receipt.");
+  }
   const { blob, fileName } = await compressImageIfNeeded(file);
   const safeName = sanitizeFileName(fileName);
   const path = `${userId}/${expenseId}/${Date.now()}_${safeName}`;
@@ -99,6 +102,7 @@ export async function uploadReceipt(file: File, userId: string, expenseId: strin
   const { data, error: insertError } = await supabase
     .from("expense_attachments")
     .insert({
+      company_id: companyId,
       expense_id: expenseId,
       storage_path: path,
       file_name: fileName,

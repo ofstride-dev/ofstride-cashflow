@@ -19,7 +19,7 @@ function AdminInvites() {
     setInfo("");
     try {
       const invite = await inviteMember(email.trim(), role);
-      setInfo(`${invite.role === "admin" ? "Admin" : "Employee"} invite sent to ${invite.email}.`);
+      setInfo(`${invite.role === "admin" ? "Admin" : "Employee"} invite created for ${invite.email}. ${invite.delivery_pending ? "The email provider is still finishing delivery; the invite remains active." : "The email has been handed to the mail provider."}`);
       setEmail("");
     } catch (nextError) {
       setError(nextError?.message || "Invite could not be sent.");

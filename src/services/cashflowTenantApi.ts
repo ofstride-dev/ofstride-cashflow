@@ -96,7 +96,7 @@ export async function createCompanyInvite(email: string, role: "admin" | "employ
       accept_url: acceptUrl,
     }),
   });
-  const parsed = await parseCashflowResponse<{ support_sent?: boolean }>(notifyRes);
+  const parsed = await parseCashflowResponse<{ support_sent?: boolean; delivery_pending?: boolean }>(notifyRes);
   if (!parsed.ok) {
     try {
       await revokeCompanyInvite(String(invite?.invite_token || ""));
@@ -109,5 +109,6 @@ export async function createCompanyInvite(email: string, role: "admin" | "employ
   return {
     ...(invite || {}),
     accept_url: acceptUrl,
+    delivery_pending: Boolean(parsed.data?.delivery_pending),
   };
 }
