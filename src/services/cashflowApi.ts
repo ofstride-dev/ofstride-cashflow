@@ -31,8 +31,36 @@ function getCachedCashflowProfile(): Record<string, any> | null {
   }
 }
 
-export const CASHFLOW_API_BASE =
-  (import.meta.env.VITE_CASHFLOW_API_BASE_URL as string | undefined) || "/api";
+function normalizeCashflowApiBase(value: string | undefined): string {
+  const configured = String(value || "").trim().replace(/\/+$/, "");
+  if (!configured) {
+    return "/api";
+  }
+
+  // Azure Functions uses /api as its HTTP route prefix. Accepting the bare
+  // Function App hostname prevents production misconfiguration from turning
+  // valid function routes into 404s (for example, /cashflow/ar instead of
+  // /api/cashflow/ar). Local/SWA-relative paths are left unchanged.
+  if (/^https?:\/\//i.test(configured)) {
+    try {
+      const url = new URL(configured);
+      if (!url.pathname || url.pathname === "/") {
+        url.pathname = "/api";
+      } else if (!url.pathname.split("/").filter(Boolean).includes("api")) {
+        url.pathname = `${url.pathname}/api`;
+      }
+      return url.toString().replace(/\/+$/, "");
+    } catch {
+      return configured;
+    }
+  }
+
+  return configured;
+}
+
+export const CASHFLOW_API_BASE = normalizeCashflowApiBase(
+  import.meta.env.VITE_CASHFLOW_API_BASE_URL as string | undefined
+);
 
 async function cashflowIdentityHeaders(): Promise<HeadersInit> {
   let session = null;
