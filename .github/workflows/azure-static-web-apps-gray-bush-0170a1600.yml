@@ -23,16 +23,19 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_CASHFLOW_API_BASE_URL: ${{ secrets.VITE_CASHFLOW_API_BASE_URL }}
         shell: bash
         run: |
           test -n "$VITE_SUPABASE_URL" || { echo "Missing GitHub Actions secret VITE_SUPABASE_URL"; exit 1; }
           test -n "$VITE_SUPABASE_ANON_KEY" || { echo "Missing GitHub Actions secret VITE_SUPABASE_ANON_KEY"; exit 1; }
+          test -n "$VITE_CASHFLOW_API_BASE_URL" || { echo "Missing GitHub Actions secret VITE_CASHFLOW_API_BASE_URL"; exit 1; }
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_CASHFLOW_API_BASE_URL: ${{ secrets.VITE_CASHFLOW_API_BASE_URL }}
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_GRAY_BUSH_0170A1600 }}
           repo_token: ${{ secrets.GITHUB_TOKEN }} # Used for Github integrations (i.e. PR comments)
