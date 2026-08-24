@@ -260,7 +260,7 @@ export default function AccountsPayable() {
         gross_amount: gross.toFixed(2),
         gst_amount: gst.toFixed(2),
         tds_amount: tds.toFixed(2),
-        net_payable: netPayable.toFixed(2),
+        net_amount: netBeforeGst.toFixed(2),
         status: inv.status || '',
       };
     });
@@ -275,7 +275,7 @@ export default function AccountsPayable() {
         { header: 'Gross Amount', key: 'gross_amount' },
         { header: 'GST Amount', key: 'gst_amount' },
         { header: 'TDS Amount', key: 'tds_amount' },
-        { header: 'Net Payable', key: 'net_payable' },
+        { header: 'Net Amount', key: 'net_amount' },
         { header: 'Status', key: 'status' },
       ],
       rows
@@ -375,7 +375,7 @@ export default function AccountsPayable() {
           <table className="table-ui">
             <thead>
               <tr>
-                {['Vendor', 'Bill #', 'Due Date', 'Gross', 'GST', 'TDS', 'Net Payable', 'Status', 'Actions'].map((h) => (
+                {['Vendor', 'Bill #', 'Due Date', 'Gross', 'GST', 'TDS', 'Net', 'Status', 'Actions'].map((h) => (
                   <th key={h}>{h}</th>
                 ))}
               </tr>
@@ -387,7 +387,6 @@ export default function AccountsPayable() {
                 const storedAmount = +inv.amount || 0;
                 const netBeforeGst = +(inv.amount_before_gst || Math.max(storedAmount - gst, 0));
                 const gross = netBeforeGst + gst;
-                const netPayable = gross - (+inv.tds_amount || 0);
                 const pending = inv.status === 'pending';
                 const approving = approvingId === inv.id;
                 return (
@@ -398,7 +397,7 @@ export default function AccountsPayable() {
                     <td className="font-semibold text-primary tabular-nums">₹{gross.toLocaleString('en-IN')}</td>
                     <td className="font-semibold text-info tabular-nums">₹{gst.toLocaleString('en-IN')}</td>
                     <td className="text-danger tabular-nums">-₹{(+inv.tds_amount || 0).toLocaleString('en-IN')}</td>
-                    <td className="font-bold text-success tabular-nums">₹{netPayable.toLocaleString('en-IN')}</td>
+                    <td className="font-bold text-success tabular-nums">₹{netBeforeGst.toLocaleString('en-IN')}</td>
                     <td>
                       <span className="badge-ui badge-ui-warning">{inv.status}</span>
                     </td>
