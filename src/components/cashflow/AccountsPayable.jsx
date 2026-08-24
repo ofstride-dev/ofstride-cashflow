@@ -15,7 +15,7 @@ const FIELD_ROWS = [
   ['Invoice Date', 'bill_date', 'date'],
   ['Total Amount Before GST', 'amount_before_gst', 'number'],
   ['GST Total', 'gst_amount', 'number'],
-  ['Total Amount', 'total_amount', 'number'],
+  ['Gross Total (Net + GST)', 'total_amount', 'number'],
 ];
 
 function TableSkeleton() {
@@ -242,10 +242,14 @@ export default function AccountsPayable() {
   const handleDownloadReport = () => {
     const now = new Date().toISOString().slice(0, 10);
     const rows = (invoices || []).map((inv) => {
-      const gross = Number(inv.amount || 0);
       const gst = Number(inv.gst_amount || 0);
+      const storedAmount = Number(inv.amount || 0);
+      // AP stores amount as the invoice total. Derive the taxable/net value
+      // from that total so Gross is always displayed as Net + GST.
+      const netBeforeGst = Number(inv.amount_before_gst || Math.max(storedAmount - gst, 0));
+      const gross = netBeforeGst + gst;
       const tds = Number(inv.tds_amount || 0);
-      const net = gross - tds;
+      const netPayable = gross - tds;
       const vendor = inv.cashflow_entities?.name || 'N/A';
 
       return {
@@ -256,7 +260,7 @@ export default function AccountsPayable() {
         gross_amount: gross.toFixed(2),
         gst_amount: gst.toFixed(2),
         tds_amount: tds.toFixed(2),
-        net_payable: net.toFixed(2),
+        net_payable: netPayable.toFixed(2),
         status: inv.status || '',
       };
     });
@@ -371,7 +375,7 @@ export default function AccountsPayable() {
           <table className="table-ui">
             <thead>
               <tr>
-                {['Vendor', 'Bill #', 'Due Date', 'Gross', 'GST', 'TDS', 'Net', 'Status', 'Actions'].map((h) => (
+                {['Vendor', 'Bill #', 'Due Date', 'Gross', 'GST', 'TDS', 'Net Payable', 'Status', 'Actions'].map((h) => (
                   <th key={h}>{h}</th>
                 ))}
               </tr>
@@ -379,7 +383,11 @@ export default function AccountsPayable() {
             <tbody>
               {invoices.map((inv) => {
                 const vendor = inv.cashflow_entities?.name || 'N/A';
-                const net = (+inv.amount || 0) - (+inv.tds_amount || 0);
+                const gst = +inv.gst_amount || 0;
+                const storedAmount = +inv.amount || 0;
+                const netBeforeGst = +(inv.amount_before_gst || Math.max(storedAmount - gst, 0));
+                const gross = netBeforeGst + gst;
+                const netPayable = gross - (+inv.tds_amount || 0);
                 const pending = inv.status === 'pending';
                 const approving = approvingId === inv.id;
                 return (
@@ -387,10 +395,10 @@ export default function AccountsPayable() {
                     <td className="font-semibold text-primary">{vendor}</td>
                     <td>{inv.bill_number}</td>
                     <td>{inv.due_date}</td>
-                    <td className="font-semibold text-primary tabular-nums">₹{(+inv.amount || 0).toLocaleString('en-IN')}</td>
-                    <td className="font-semibold text-info tabular-nums">₹{(+inv.gst_amount || 0).toLocaleString('en-IN')}</td>
+                    <td className="font-semibold text-primary tabular-nums">₹{gross.toLocaleString('en-IN')}</td>
+                    <td className="font-semibold text-info tabular-nums">₹{gst.toLocaleString('en-IN')}</td>
                     <td className="text-danger tabular-nums">-₹{(+inv.tds_amount || 0).toLocaleString('en-IN')}</td>
-                    <td className="font-bold text-success tabular-nums">₹{net.toLocaleString('en-IN')}</td>
+                    <td className="font-bold text-success tabular-nums">₹{netPayable.toLocaleString('en-IN')}</td>
                     <td>
                       <span className="badge-ui badge-ui-warning">{inv.status}</span>
                     </td>

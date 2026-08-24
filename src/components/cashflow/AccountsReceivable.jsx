@@ -266,8 +266,8 @@ export default function AccountsReceivable() {
         { header: 'Invoice Number', key: 'invoice_number' },
         { header: 'Invoice Date', key: 'invoice_date' },
         { header: 'Due Date', key: 'due_date' },
-        { header: 'Amount', key: 'amount' },
-        { header: 'GST Amount', key: 'gst_amount' },
+        { header: 'Net Amount', key: 'amount' },
+        { header: 'Net Amount', key: 'amount' },
         { header: 'Total Invoice Value', key: 'total_invoice_value' },
         { header: 'Status', key: 'status' },
         { header: 'Is Proforma', key: 'is_proforma' },
@@ -315,7 +315,7 @@ export default function AccountsReceivable() {
             <input id="ar-invoice_date" type="date" name="invoice_date" value={formData.invoice_date} onChange={handleInputChange} required className="input-ui" />
           </div>
           <div>
-            <label className="label-ui" htmlFor="ar-amount">Amount (₹)</label>
+            <label className="label-ui" htmlFor="ar-amount">Net Amount (₹)</label>
             <input id="ar-amount" type="number" name="amount" value={formData.amount} onChange={handleInputChange} required className="input-ui" />
           </div>
           <div>
@@ -392,15 +392,18 @@ export default function AccountsReceivable() {
                 <th>Customer</th>
                 <th>Invoice #</th>
                 <th>Date</th>
-                <th>Amount</th>
-                <th>Total (w/ GST)</th>
+                <th>Net</th>
+                <th>GST</th>
+                <th>Gross</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {invoices.map((inv) => {
-                const total = parseFloat(inv.amount || 0) + parseFloat(inv.gst_amount || 0);
+                const net = parseFloat(inv.amount || 0);
+                const gst = parseFloat(inv.gst_amount || 0);
+                const total = net + gst;
 
                 return (
                   <tr key={inv.id}>
@@ -415,7 +418,8 @@ export default function AccountsReceivable() {
                       {inv.irn_number && <div className="mt-1 text-xs text-muted">IRN: {inv.irn_number.substring(0, 10)}...</div>}
                     </td>
                     <td>{inv.invoice_date}</td>
-                    <td className="tabular-nums">₹{parseFloat(inv.amount || 0).toLocaleString('en-IN')}</td>
+                    <td className="tabular-nums">₹{net.toLocaleString('en-IN')}</td>
+                    <td className="font-semibold text-info tabular-nums">₹{gst.toLocaleString('en-IN')}</td>
                     <td className="font-semibold text-primary tabular-nums">₹{total.toLocaleString('en-IN')}</td>
                     <td>
                       <span className={`badge-ui ${inv.status === 'paid' ? 'badge-ui-success' : 'badge-ui-neutral'}`}>
@@ -448,7 +452,7 @@ export default function AccountsReceivable() {
               })}
               {!loading && invoices.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="py-12 text-center text-muted">
+                  <td colSpan="8" className="py-12 text-center text-muted">
                     No invoices created yet.
                   </td>
                 </tr>
