@@ -63,9 +63,9 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_EED27B738214446BB01573AD4107388D }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_233886A9334C42A7B361D9577C76190C }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_D79D86DAA64341A6AD251FEC74A6333C }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID || secrets.AZUREAPPSERVICE_CLIENTID_EED27B738214446BB01573AD4107388D }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID || secrets.AZUREAPPSERVICE_TENANTID_233886A9334C42A7B361D9577C76190C }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID || secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_D79D86DAA64341A6AD251FEC74A6333C }}
 
       - name: Build Python Dependencies Into Package
         shell: bash
