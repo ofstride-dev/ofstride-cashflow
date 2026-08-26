@@ -111,6 +111,7 @@ jobs:
           az functionapp config appsettings set \
             --name func-si-ofs-cashflow-001 \
             --resource-group "$RG" \
+            --subscription "${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_D79D86DAA64341A6AD251FEC74A6333C}}" \ }}" \
             --settings "${SETTINGS[@]}"
 
       - name: Deploy Cashflow Function App
