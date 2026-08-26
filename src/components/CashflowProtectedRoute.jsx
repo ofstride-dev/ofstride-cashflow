@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useCashflowAuth } from "../context/CashflowAuthContext";
 import { canUseCashflow, hasCashflowRole } from "../auth/cashflowPermissions";
+import CashflowLoadingScreen from "./cashflow/CashflowLoadingScreen";
 
 function CashflowProtectedRoute({ children, adminOnly = false, allowedRoles = null, allowWithoutCompany = false }) {
   const { session, profile, profileError, loading, refreshProfile } = useCashflowAuth();
@@ -25,11 +26,7 @@ function CashflowProtectedRoute({ children, adminOnly = false, allowedRoles = nu
   }, [session, profile, profileError, loading, refreshProfile]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-surface">
-        <p className="text-sm text-muted">Loading...</p>
-      </div>
-    );
+    return <CashflowLoadingScreen />;
   }
 
   if (!session) {

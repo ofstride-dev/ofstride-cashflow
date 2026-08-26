@@ -1,6 +1,7 @@
 import os
 import logging
 import uuid
+import time
 from typing import Any
 
 import azure.functions as func
@@ -19,6 +20,9 @@ ALLOWED_ROLES = set(CASHFLOW_ROLES) | {"employer"}
 APPROVER_ROLES = set(CASHFLOW_APPROVER_ROLES)
 WORKSPACE_MEMBER_ROLES = set(CASHFLOW_ROLES)
 _logger = logging.getLogger("ofstride.cashflow.auth")
+
+_PROFILE_CACHE_TTL_SECONDS = 30
+_profile_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
 
 
 class ProfileLookupError(RuntimeError):
@@ -110,6 +114,10 @@ def _get_profile_for_user(user_id: str) -> dict[str, Any] | None:
     if not user_id or not _is_valid_uuid(user_id):
         return None
 
+    cached = _profile_cache.get(user_id)
+    if cached and cached[0] > time.monotonic():
+        return dict(cached[1]) if cached[1] else None
+
     try:
         from shared.db import get_supabase_client
 
@@ -122,7 +130,11 @@ def _get_profile_for_user(user_id: str) -> dict[str, Any] | None:
             .execute()
         )
         rows = response.data or []
-        return rows[0] if rows else None
+        profile = rows[0] if rows else None
+        if len(_profile_cache) > 2048:
+            _profile_cache.clear()
+        _profile_cache[user_id] = (time.monotonic() + _PROFILE_CACHE_TTL_SECONDS, profile)
+        return profile
     except Exception as exc:
         _logger.exception("Cashflow profile lookup failed", extra={"user_id": user_id})
         raise ProfileLookupError("Cashflow profile lookup failed") from exc
@@ -197,7 +209,9 @@ def require_cashflow_tenant(req: func.HttpRequest) -> dict[str, Any]:
         }
 
     tenant = context_from_identity(identity)
-    _record_tenant_event(tenant, "cashflow.authenticated", result="success")
+    # Authentication is on the critical path for every dashboard fan-out
+    # request. Detailed business actions are audited by their handlers; do not
+    # perform an extra database insert merely for a successful auth check.
     return {
         **auth,
         "identity": identity,

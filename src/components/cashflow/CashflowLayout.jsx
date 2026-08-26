@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { cashflowFetch } from '../../services/cashflowApi';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
+import CashflowLoadingScreen from './CashflowLoadingScreen';
 
 const NAV_ITEMS = [
   { label: 'Dashboard', path: '/cashflow/dashboard', icon: LayoutDashboard },
@@ -168,14 +169,7 @@ function CashflowShell() {
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-surface flex items-center justify-center">
-        <div className="flex items-center gap-3 text-sm text-muted">
-          <span className="h-2 w-2 rounded-full bg-secondary animate-pulse" />
-          Loading workspace…
-        </div>
-      </div>
-    );
+    return <CashflowLoadingScreen message="Getting your workspace ready…" />;
   }
 
   if (!session) {

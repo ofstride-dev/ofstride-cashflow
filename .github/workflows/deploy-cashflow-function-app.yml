@@ -1,0 +1,131 @@
+name: Deploy Cashflow APIs to Azure Functions
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'api/cashflow/**'
+      - 'api/cashflow_analyst/**'
+      - 'api/cashflow_ap/**'
+      - 'api/cashflow_ar/**'
+      - 'api/cashflow_dashboard/**'
+      - 'api/cashflow_invites/**'
+      - 'api/cashflow_payments/**'
+      - 'api/cashflow_pettycash/**'
+      - 'api/cashflow_reconcile/**'
+      - 'api/cashflow_report_scheduler/**'
+      - 'api/export_gstr/**'
+      - 'api/shared/**'
+      - 'api/requirements.txt'
+      - 'api/host.json'
+      - '.github/workflows/deploy-cashflow-function-app.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy Cashflow APIs
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Stage Cashflow Function App
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p __staged_cashflow
+          for folder in \
+            cashflow \
+            cashflow_analyst \
+            cashflow_ap \
+            cashflow_ar \
+            cashflow_dashboard \
+            cashflow_invites \
+            cashflow_payments \
+            cashflow_pettycash \
+            cashflow_reconcile \
+            cashflow_report_scheduler \
+            export_gstr \
+            shared; do
+            cp -r "api/$folder" "__staged_cashflow/$folder"
+          done
+          cp api/requirements.txt api/host.json __staged_cashflow/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_EED27B738214446BB01573AD4107388D }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_233886A9334C42A7B361D9577C76190C }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_D79D86DAA64341A6AD251FEC74A6333C }}
+
+      - name: Build Python Dependencies Into Package
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r __staged_cashflow/requirements.txt \
+            --target "__staged_cashflow/.python_packages/lib/site-packages"
+
+      - name: Sync Cashflow App Settings
+        shell: bash
+        env:
+          ANALYST_LLM_PROVIDER: ${{ secrets.CASHFLOW_ANALYST_LLM_PROVIDER }}
+          ANALYST_AZURE_OPENAI_DEPLOYMENT: ${{ secrets.CASHFLOW_ANALYST_AZURE_OPENAI_DEPLOYMENT }}
+          ANALYST_REASONING_EFFORT: ${{ secrets.CASHFLOW_ANALYST_REASONING_EFFORT }}
+          ANALYST_VERBOSITY: ${{ secrets.CASHFLOW_ANALYST_VERBOSITY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.CASHFLOW_AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_VERSION: ${{ secrets.CASHFLOW_AZURE_OPENAI_API_VERSION }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.CASHFLOW_AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${{ secrets.CASHFLOW_AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
+          SUPABASE_URL: ${{ secrets.CASHFLOW_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.CASHFLOW_SUPABASE_SERVICE_ROLE_KEY }}
+          REPORT_EMAIL_URL: ${{ secrets.CASHFLOW_REPORT_EMAIL_URL }}
+          REPORT_EMAIL_SHARED_SECRET: ${{ secrets.REPORT_EMAIL_SHARED_SECRET }}
+        run: |
+          set -euo pipefail
+          RG=$(az resource list --name func-si-ofs-cashflow-001 --resource-type Microsoft.Web/sites --query "[0].resourceGroup" -o tsv)
+          test -n "$RG" || { echo "Could not resolve resource group"; exit 1; }
+          SETTINGS=(
+            "FUNCTIONS_WORKER_RUNTIME=python"
+            "ANALYST_LLM_PROVIDER=${ANALYST_LLM_PROVIDER:-azure_openai}"
+            "ANALYST_AZURE_OPENAI_DEPLOYMENT=${ANALYST_AZURE_OPENAI_DEPLOYMENT:-gpt-5-mini}"
+            "ANALYST_REASONING_EFFORT=${ANALYST_REASONING_EFFORT:-minimal}"
+            "ANALYST_VERBOSITY=${ANALYST_VERBOSITY:-low}"
+          )
+          add_setting() { [ -n "${2:-}" ] && SETTINGS+=("$1=$2"); }
+          add_setting "AZURE_OPENAI_ENDPOINT" "$AZURE_OPENAI_ENDPOINT"
+          add_setting "AZURE_OPENAI_API_VERSION" "$AZURE_OPENAI_API_VERSION"
+          add_setting "AZURE_OPENAI_API_KEY" "$AZURE_OPENAI_API_KEY"
+          add_setting "AZURE_OPENAI_EMBEDDING_DEPLOYMENT" "$AZURE_OPENAI_EMBEDDING_DEPLOYMENT"
+          add_setting "SUPABASE_URL" "$SUPABASE_URL"
+          add_setting "SUPABASE_SERVICE_ROLE_KEY" "$SUPABASE_SERVICE_ROLE_KEY"
+          add_setting "REPORT_EMAIL_URL" "$REPORT_EMAIL_URL"
+          add_setting "REPORT_EMAIL_SHARED_SECRET" "$REPORT_EMAIL_SHARED_SECRET"
+          az functionapp config appsettings set \
+            --name func-si-ofs-cashflow-001 \
+            --resource-group "$RG" \
+            --settings "${SETTINGS[@]}"
+
+      - name: Deploy Cashflow Function App
+        uses: Azure/functions-action@v1
+        with:
+          app-name: func-si-ofs-cashflow-001
+          package: __staged_cashflow
+
+      - name: Verify Cashflow Deployment
+        shell: bash
+        run: |
+          sleep 15
+          BASE="https://func-si-ofs-cashflow-001-bzcdd7fsdtaufrgy.southindia-01.azurewebsites.net/api"
+          curl -sS -m 30 -o /dev/null -w "Analyst endpoint status: %{http_code}\n" \
+            -X OPTIONS "${BASE}/cashflow/analyst" || true
+          curl -sS -m 30 -o /dev/null -w "Dashboard endpoint status: %{http_code}\n" \
+            -X OPTIONS "${BASE}/cashflow/dashboard" || true

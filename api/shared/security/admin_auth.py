@@ -21,6 +21,7 @@ import hmac
 import json
 import logging
 import os
+import time
 from typing import Any
 from urllib import error as urlerror
 from urllib import request as urlrequest
@@ -29,6 +30,13 @@ import azure.functions as func
 
 # Force pipeline trigger — lazy imports fix deployed
 _logger = logging.getLogger("ofstride.admin_auth")
+
+# Function workers are long-lived processes. Cache successful token validation
+# briefly so dashboard fan-out requests do not each perform a remote Supabase
+# Auth API round trip. Expiry is deliberately short; revocation remains bounded
+# by this TTL and normal JWT expiry validation still applies when refreshed.
+_TOKEN_CACHE_TTL_SECONDS = 30
+_token_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 class AdminAuthError(Exception):
@@ -94,6 +102,10 @@ def _extract_admin_key(req: func.HttpRequest) -> str | None:
 
 def _verify_supabase_jwt(token: str) -> dict[str, Any]:
     """Verify a Supabase Auth access token and determine the user's role."""
+    now = time.monotonic()
+    cached = _token_cache.get(token)
+    if cached and cached[0] > now:
+        return dict(cached[1])
     supabase_url = _env("SUPABASE_URL")
     if not supabase_url:
         raise AdminAuthError("Supabase authentication is not configured.")
@@ -191,13 +203,18 @@ def _verify_supabase_jwt(token: str) -> dict[str, Any]:
         if not is_admin_by_role and not is_admin_by_email:
             raise AdminAuthError("Admin privileges required.")
 
-    return {
+    result = {
         "user_id": user_id,
         "user_name": str(user_name),
         "user_email": email.lower() if isinstance(email, str) and email else None,
         "role": primary_role,
         "company_id": str(company_id) if company_id else None,
     }
+    # Keep the cache bounded in the unusual case of many short-lived sessions.
+    if len(_token_cache) > 2048:
+        _token_cache.clear()
+    _token_cache[token] = (now + _TOKEN_CACHE_TTL_SECONDS, result)
+    return dict(result)
 
 
 def _verify_via_supabase_auth_api(token: str, supabase_url: str) -> dict[str, Any] | None:

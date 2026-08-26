@@ -283,13 +283,25 @@ class LLMFactory:
                 # credential (not azure.identity.aio) — the aio variant requires the
                 # aiohttp package, which is not in requirements.txt, and the OpenAI
                 # SDK's async client accepts sync token-provider callables just fine.
-                from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+                from azure.identity import DefaultAzureCredential
 
-                token_provider = get_bearer_token_provider(
-                    DefaultAzureCredential(),
-                    "https://cognitiveservices.azure.com/.default",
-                )
+                credential = DefaultAzureCredential()
+
+                # AsyncAzureOpenAI requires an async token provider. The
+                # synchronous azure.identity helper returns a sync callable,
+                # which the OpenAI SDK 2.x does not recognize and consequently
+                # reports as missing credentials.
+                async def token_provider() -> str:
+                    token = credential.get_token(
+                        "https://cognitiveservices.azure.com/.default"
+                    )
+                    return token.token
+
                 self._azure_openai_client = AsyncAzureOpenAI(
+                    # openai 2.53 performs a key-presence check before it
+                    # accepts the Azure AD provider. This non-secret sentinel
+                    # satisfies that check; requests use the bearer token.
+                    api_key="managed-identity",
                     azure_endpoint=self._settings.azure_openai_endpoint,
                     azure_ad_token_provider=token_provider,
                     api_version=self._settings.azure_openai_api_version,
@@ -300,8 +312,13 @@ class LLMFactory:
         selected = await self.get_healthy_llm_with_metadata()
         return selected.client, selected.provider
 
-    async def get_healthy_llm_with_metadata(self) -> LLMSelection:
-        provider = (self._settings.llm_provider or LLMProvider.OPENAI.value).lower()
+    async def get_healthy_llm_with_metadata(
+        self,
+        *,
+        provider_override: str | None = None,
+        deployment_override: str | None = None,
+    ) -> LLMSelection:
+        provider = (provider_override or self._settings.llm_provider or LLMProvider.OPENAI.value).lower()
         openai_configured = _is_configured_secret(self._settings.openai_api_key)
         # Azure OpenAI only strictly needs an endpoint: if no API key is set, we
         # authenticate via managed identity instead (see _get_azure_openai_client).
@@ -323,7 +340,7 @@ class LLMFactory:
                 raise RuntimeError("Azure OpenAI circuit breaker is open.")
 
             if azure_configured:
-                deployment = self._settings.azure_openai_deployment or self._settings.model_name
+                deployment = deployment_override or self._settings.azure_openai_deployment or self._settings.model_name
                 self._record_provider_success(LLMProvider.AZURE_OPENAI)
                 return LLMSelection(
                     client=OpenAILLMClient(

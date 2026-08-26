@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 from typing import Any
 
-from core.settings import get_settings
+try:
+    from shared.core.settings import get_settings
+except ImportError:  # Existing chat orchestration imports this package from api/shared.
+    from core.settings import get_settings
 
 _logger = logging.getLogger("ofstride.langfuse")
 
@@ -155,6 +159,70 @@ class LangfuseTracer:
             self._client.flush()
         except Exception as exc:
             _logger.warning("Langfuse trace_turn failed: %s", exc)
+
+    def trace_analyst(
+        self,
+        *,
+        trace_id: str,
+        tenant_id: str | None,
+        intent: str,
+        question: str,
+        period: dict[str, Any],
+        sources: list[str],
+        unavailable: list[str],
+        metrics: dict[str, Any],
+        provider: str,
+        model: str | None,
+        fallback_used: bool,
+        latency_ms: int,
+        llm_error: str | None,
+    ) -> None:
+        """Record analyst diagnostics without sending financial rows or prompts."""
+        self._ensure_init()
+        if not self.enabled or self._client is None:
+            return
+        try:
+            question_hash = hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
+            trace = self._client.start_observation(
+                trace_context={"trace_id": trace_id},
+                name="financial-analyst-request",
+                metadata={
+                    "tenant_id": tenant_id,
+                    "intent": intent,
+                    "period": period,
+                    "sources": sources,
+                    "unavailable_sources": unavailable,
+                    "source_counts": {
+                        key: value for key, value in metrics.items()
+                        if key.endswith("_count") or key == "transaction_count"
+                    },
+                    "provider": provider,
+                    "model": model,
+                    "fallback_used": fallback_used,
+                    "latency_ms": latency_ms,
+                    "llm_error_type": type(llm_error).__name__ if llm_error else None,
+                },
+                input={"intent": intent, "question_sha256_prefix": question_hash},
+                output={"status": "fallback" if fallback_used else "completed"},
+            )
+            generation = trace.start_observation(
+                as_type="generation",
+                name="financial-analyst-generation",
+                model=model or provider,
+                input={"intent": intent, "question_sha256_prefix": question_hash},
+                output={"status": "fallback" if fallback_used else "completed"},
+                metadata={
+                    "fallback_used": fallback_used,
+                    "latency_ms": latency_ms,
+                    "error_type": type(llm_error).__name__ if llm_error else None,
+                },
+            )
+            generation.end()
+            trace.end()
+            self._client.flush()
+        except Exception as exc:
+            # Observability must never affect a read-only financial response.
+            _logger.warning("Langfuse analyst trace failed: %s", exc)
 
 
 _tracer = LangfuseTracer()

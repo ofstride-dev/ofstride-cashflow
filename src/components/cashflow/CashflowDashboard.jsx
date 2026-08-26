@@ -132,23 +132,58 @@ function BreakdownChart({ breakdown }) {
 
 function DashboardSkeleton() {
   return (
-    <div className="max-w-6xl mx-auto space-y-6" aria-busy="true" aria-live="polite">
-      <div className="flex items-center justify-between gap-4">
-        <div className="skeleton-ui h-8 w-56" />
-        <div className="skeleton-ui h-10 w-72" />
+    <div className="dashboard-loading-wrap" aria-busy="true" aria-live="polite">
+      <div className="max-w-6xl mx-auto space-y-6 dashboard-loading-content" aria-hidden="true">
+        <div className="flex items-center justify-between gap-4">
+          <div className="skeleton-ui h-8 w-56" />
+          <div className="skeleton-ui h-10 w-72" />
+        </div>
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="skeleton-ui h-24" />
+          ))}
+        </div>
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+          <div className="skeleton-ui h-64" />
+          <div className="skeleton-ui h-64" />
+        </div>
       </div>
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="skeleton-ui h-24" />
-        ))}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
-        <div className="skeleton-ui h-64" />
-        <div className="skeleton-ui h-64" />
+      <div className="dashboard-loading-message">
+        <div className="dashboard-loading-spinner" aria-hidden="true"><BarChart3 className="h-5 w-5" /></div>
+        <p className="dashboard-loading-title">Getting your dashboard ready</p>
+        <p className="dashboard-loading-subtitle">Loading your latest financial insights…</p>
+        <div className="dashboard-loading-bar" aria-hidden="true"><span /></div>
       </div>
       <span className="sr-only">Loading cash flow metrics…</span>
     </div>
   );
+}
+
+function AnalystLoadingStatus({ active }) {
+  const labels = [
+    'Reading transactions...',
+    'Reviewing accounts payable and receivable...',
+    'Analyzing...',
+  ];
+  const [labelIndex, setLabelIndex] = useState(0);
+
+  useEffect(() => {
+    if (!active) return undefined;
+
+    const resetTimer = setTimeout(() => setLabelIndex(0), 0);
+    const firstStepTimer = setTimeout(() => setLabelIndex(1), 1500);
+    const secondStepTimer = setTimeout(() => setLabelIndex(2), 5000);
+
+    return () => {
+      clearTimeout(resetTimer);
+      clearTimeout(firstStepTimer);
+      clearTimeout(secondStepTimer);
+    };
+  }, [active]);
+
+  if (!active) return null;
+
+  return <span className="ai-loading-status" role="status" aria-live="polite">{labels[labelIndex]}</span>;
 }
 
 export default function CashflowDashboard() {
@@ -168,14 +203,86 @@ export default function CashflowDashboard() {
   const [customEndDate, setCustomEndDate] = useState(todayIso);
   const [loading, setLoading] = useState(true);
   const [aiResponse, setAiResponse] = useState('Select an insight to generate a live analyst response.');
+  const [aiQuestion, setAiQuestion] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiCoverage, setAiCoverage] = useState(null);
+  const [reportSending, setReportSending] = useState(false);
+  const [reportMessage, setReportMessage] = useState('');
+  const [scheduledReports, setScheduledReports] = useState(false);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const canSendReport = ['owner', 'admin', 'finance'].includes(String(profile?.role || '').toLowerCase());
+  const canManageScheduledReports = ['owner', 'admin'].includes(String(profile?.role || '').toLowerCase());
 
-  const runAiPrompt = (prompt) => {
-    const responses = {
-      summary: `Your cash position is ${momentumSummary.net >= 0 ? 'healthy, with inflows ahead of outflows' : 'under pressure, with outflows ahead of inflows'}. The latest period shows ${formatMoney(momentumSummary.inflow)} received and ${formatMoney(momentumSummary.outflow)} spent.`,
-      report: 'Executive report ready: collections are the key near-term lever. Prioritise pending customer receipts, review vendor commitments, and protect runway for the next operating cycle.',
-      explain: 'Net movement is the difference between cash received and cash spent. A positive number means your available cash is building during the selected period.',
-    };
-    setAiResponse(responses[prompt]);
+  useEffect(() => {
+    if (!canManageScheduledReports) return undefined;
+    cashflowFetch('/cashflow/analyst', { method: 'POST', body: JSON.stringify({ intent: 'report_settings' }) })
+      .then(parseCashflowResponse)
+      .then((parsed) => { if (parsed.ok) setScheduledReports(Boolean(parsed.data?.weekly_reports_enabled)); })
+      .catch(() => {});
+    return undefined;
+  }, [canManageScheduledReports, authIdentityKey]);
+
+  const toggleScheduledReports = async (event) => {
+    const enabled = event.target.checked;
+    setScheduleLoading(true);
+    try {
+      const response = await cashflowFetch('/cashflow/analyst', { method: 'POST', body: JSON.stringify({ intent: 'report_settings', enabled }) });
+      const parsed = await parseCashflowResponse(response);
+      if (!parsed.ok) throw new Error(parsed.error || 'Could not update scheduled reports');
+      setScheduledReports(Boolean(parsed.data?.weekly_reports_enabled));
+    } catch (error) {
+      setReportMessage(error instanceof Error ? error.message : 'Could not update scheduled reports');
+    } finally {
+      setScheduleLoading(false);
+    }
+  };
+
+  const sendReport = async (reportType) => {
+    setReportSending(true);
+    setReportMessage('');
+    try {
+      const response = await cashflowFetch('/cashflow/analyst', { method: 'POST', body: JSON.stringify({ intent: 'report_email', report_type: reportType }) });
+      const parsed = await parseCashflowResponse(response);
+      if (!parsed.ok) throw new Error(parsed.error || 'Report email failed');
+      setReportMessage(`${reportType === 'weekly' ? 'Weekly' : 'Monthly'} report sent to ${parsed.data?.sent || 0} active members.`);
+    } catch (error) {
+      setReportMessage(error instanceof Error ? error.message : 'Report email failed');
+    } finally {
+      setReportSending(false);
+    }
+  };
+
+  const runAiPrompt = async (intent, question = '') => {
+    setAiLoading(true);
+    setAiError('');
+    try {
+      const response = await cashflowFetch('/cashflow/analyst', {
+        method: 'POST',
+        body: JSON.stringify({
+          intent,
+          question: question.trim(),
+          period: periodKey,
+          ...(periodKey === 'custom' ? { start_date: customStartDate, end_date: customEndDate } : {}),
+        }),
+      });
+      const parsed = await parseCashflowResponse(response);
+      if (!parsed.ok) throw new Error(parsed.error || 'Analyst unavailable');
+      setAiResponse(parsed.data?.answer || parsed.data?.headline || 'No analyst response was returned.');
+      setAiCoverage(parsed.data?.coverage || null);
+      setAiQuestion('');
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Analyst unavailable');
+      setAiCoverage(null);
+      setAiResponse('The analyst could not complete this request. Review the data coverage and try again.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const submitAiQuestion = (event) => {
+    event.preventDefault();
+    if (aiQuestion.trim()) runAiPrompt('ask', aiQuestion);
   };
 
   // Build a zero-filled dashboard payload so first-time users and API outages
@@ -259,13 +366,15 @@ export default function CashflowDashboard() {
         if (isCurrent) setReconcileRuns([]);
       });
 
-    Promise.all([dashboardPromise, reconcilePromise])
-      .catch(() => {
-        if (isCurrent) setReconcileRuns([]);
-      })
-      .finally(() => {
-        if (isCurrent) setLoading(false);
-      });
+    // Reconciliation is an optional side panel. Render the primary dashboard
+    // as soon as its own request completes instead of waiting for this second
+    // network call, which can make an otherwise-ready dashboard look stuck.
+    dashboardPromise.finally(() => {
+      if (isCurrent) setLoading(false);
+    });
+    reconcilePromise.catch(() => {
+      if (isCurrent) setReconcileRuns([]);
+    });
 
     return () => {
       isCurrent = false;
@@ -388,7 +497,24 @@ export default function CashflowDashboard() {
             <div className="ai-feature"><MessageCircle /><span>Ask your ledger</span></div><div className="ai-feature"><Languages /><span>Explain metrics</span></div><div className="ai-feature"><BarChart3 /><span>Generate charts</span></div><div className="ai-feature"><ClipboardCheck /><span>Board summaries</span></div>
           </div>
         </div>
-        <div className="mt-5 border-t border-slate-200 pt-4"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => runAiPrompt('summary')} className="ai-action-button"><MessageCircle className="h-4 w-4" /> Summarise reports</button><button type="button" onClick={() => runAiPrompt('report')} className="ai-action-button"><FileText className="h-4 w-4" /> Generate report</button><button type="button" onClick={() => runAiPrompt('explain')} className="ai-action-button"><Languages className="h-4 w-4" /> Explain net movement</button></div><div className="ai-response mt-3"><Sparkles className="h-4 w-4 shrink-0" /><p>{aiResponse}</p><RefreshCw className="ml-auto h-3.5 w-3.5 shrink-0 opacity-50" /></div></div>
+        <div className="mt-5 border-t border-slate-200 pt-4">
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={aiLoading} onClick={() => runAiPrompt('summary')} className="ai-action-button"><MessageCircle className="h-4 w-4" /> Summarise reports</button>
+            <button type="button" disabled={aiLoading} onClick={() => runAiPrompt('report')} className="ai-action-button"><FileText className="h-4 w-4" /> Generate report</button>
+            {canSendReport && <><button type="button" disabled={reportSending} onClick={() => sendReport('weekly')} className="ai-action-button"><FileText className="h-4 w-4" /> {reportSending ? 'Sending…' : 'Email weekly report'}</button><button type="button" disabled={reportSending} onClick={() => sendReport('monthly')} className="ai-action-button"><FileText className="h-4 w-4" /> Email monthly report</button></>}
+            {canManageScheduledReports && <label className="ai-action-button cursor-pointer"><input type="checkbox" checked={scheduledReports} disabled={scheduleLoading} onChange={toggleScheduledReports} className="accent-cyan-600" /> Weekly reports every Monday 9:00 AM IST</label>}
+            <button type="button" disabled={aiLoading} onClick={() => runAiPrompt('explain_movement')} className="ai-action-button"><Languages className="h-4 w-4" /> Explain net movement</button>
+            <button type="button" disabled={aiLoading} onClick={() => runAiPrompt('explain_metric', 'Accounts payable and receivables')} className="ai-action-button"><BarChart3 className="h-4 w-4" /> Explain AP / AR</button>
+          </div>
+          <form onSubmit={submitAiQuestion} className="mt-3 flex gap-2">
+            <input value={aiQuestion} onChange={(event) => setAiQuestion(event.target.value)} disabled={aiLoading} className="input-ui min-w-0 flex-1" placeholder="Ask your finance analyst…" aria-label="Ask your finance analyst" />
+            <button type="submit" disabled={aiLoading || !aiQuestion.trim()} className="btn-ui btn-ui-primary whitespace-nowrap">{aiLoading ? 'Analysing…' : 'Ask'}</button>
+          </form>
+          {aiError && <p className="mt-2 text-xs text-rose-600">{aiError}</p>}
+          {reportMessage && <p className="mt-2 text-xs text-cyan-700">{reportMessage}</p>}
+          {aiCoverage?.unavailable?.length > 0 && <p className="mt-2 text-xs text-amber-700">Partial coverage: {aiCoverage.unavailable.join(', ')}.</p>}
+          <div className="ai-response mt-3"><Sparkles className="h-4 w-4 shrink-0" /><div className="min-w-0 flex-1">{aiLoading ? <AnalystLoadingStatus active /> : <p>{aiResponse}</p>}</div><RefreshCw className={`ml-auto h-3.5 w-3.5 shrink-0 opacity-50 ${aiLoading ? 'animate-spin' : ''}`} /></div>
+        </div>
       </div>
 
       {/* Trend + breakdown */}
