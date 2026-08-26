@@ -1,4 +1,4 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/azure/functions-actions
+# Docs for the Azure Web Apps Deploy action: https://github.com/azure/functions-action
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 # More info on Python, GitHub Actions, and Azure Functions: https://aka.ms/python-webapps-actions
 
@@ -29,13 +29,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Create and start virtual environment
+      - name: Install dependencies into the Functions package
         run: |
-          python -m venv venv
-          source venv/bin/activate
-
-      - name: Install dependencies
-        run: pip install -r api/requirements.txt
+          python -m pip install --upgrade pip
+          python -m pip install -r api/requirements.txt \
+            --target api/.python_packages/lib/site-packages
 
       # Optional: Add step to run tests here
 
@@ -48,7 +46,6 @@ jobs:
           name: python-app
           path: |
             release.zip
-            !venv/
 
   deploy:
     runs-on: ubuntu-latest
@@ -67,7 +64,7 @@ jobs:
         run: |
           unzip release.zip
           rm release.zip
-        
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -82,4 +79,3 @@ jobs:
           app-name: 'func-si-ofs-cashflow-001'
           slot-name: 'Production'
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          
