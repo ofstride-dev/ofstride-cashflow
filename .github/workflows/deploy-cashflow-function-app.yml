@@ -91,8 +91,7 @@ jobs:
           REPORT_EMAIL_SHARED_SECRET: ${{ secrets.REPORT_EMAIL_SHARED_SECRET }}
         run: |
           set -euo pipefail
-          RG=$(az resource list --name func-si-ofs-cashflow-001 --resource-type Microsoft.Web/sites --query "[0].resourceGroup" -o tsv)
-          test -n "$RG" || { echo "Could not resolve resource group"; exit 1; }
+          RG="was-ofstride-002_group"
           SETTINGS=(
             "FUNCTIONS_WORKER_RUNTIME=python"
             "ANALYST_LLM_PROVIDER=${ANALYST_LLM_PROVIDER:-azure_openai}"
