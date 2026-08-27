@@ -37,3 +37,7 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# Local agent/tooling artifacts
+skills/
+skills-lock.json
