@@ -315,10 +315,6 @@ class LLMFactory:
                     return token.token
 
                 self._azure_openai_client = AsyncAzureOpenAI(
-                    # openai 2.53 performs a key-presence check before it
-                    # accepts the Azure AD provider. This non-secret sentinel
-                    # satisfies that check; requests use the bearer token.
-                    api_key="managed-identity",
                     azure_endpoint=self._settings.azure_openai_endpoint,
                     azure_ad_token_provider=token_provider,
                     api_version=self._settings.azure_openai_api_version,
