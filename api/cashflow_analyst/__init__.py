@@ -468,6 +468,15 @@ async def _call_reasoning_model(selection: Any, system_prompt: str, prompt: str)
         raise RuntimeError("Reasoning model selected but raw client/model name is not exposed")
 
     settings = get_settings()
+    LOGGER.info(
+        "analyst_llm_call_start provider=azure_openai model=%s api_version=%s "
+        "reasoning_effort=%s verbosity=%s timeout_seconds=%s",
+        model_name,
+        settings.azure_openai_api_version,
+        DEFAULT_REASONING_EFFORT or "omitted",
+        DEFAULT_VERBOSITY or "omitted",
+        settings.llm_timeout_seconds,
+    )
     kwargs: dict[str, Any] = dict(
         model=model_name,
         max_completion_tokens=max(900, min(get_settings().max_tokens, 1500)),
@@ -489,6 +498,11 @@ async def _call_reasoning_model(selection: Any, system_prompt: str, prompt: str)
     content = _completion_content(completion)
     if not content:
         raise ValueError("Analyst model returned empty content")
+    LOGGER.info(
+        "analyst_llm_call_success provider=azure_openai model=%s response_chars=%s",
+        model_name,
+        len(content),
+    )
     return content
 
 
@@ -498,11 +512,29 @@ async def _synthesize(intent: str, question: str, evidence: dict[str, Any]) -> t
     started = time.monotonic()
     try:
         settings = get_settings()
+        LOGGER.info(
+            "analyst_llm_selection_start provider_override=%s deployment_override=%s "
+            "configured_provider=%s endpoint_configured=%s azure_api_key_configured=%s "
+            "analyst_reasoning_effort=%s analyst_verbosity=%s",
+            settings.analyst_llm_provider or "none",
+            settings.analyst_azure_openai_deployment or "none",
+            settings.llm_provider,
+            bool((settings.azure_openai_endpoint or "").strip()),
+            bool((settings.azure_openai_api_key or "").strip()),
+            DEFAULT_REASONING_EFFORT or "omitted",
+            DEFAULT_VERBOSITY or "omitted",
+        )
         selection = await get_llm_factory().get_healthy_llm_with_metadata(
             provider_override=settings.analyst_llm_provider,
             deployment_override=settings.analyst_azure_openai_deployment,
         )
         selected_provider = selection.provider.value
+        LOGGER.info(
+            "analyst_llm_selected provider=%s model=%s fallback_reason=%s",
+            selected_provider,
+            getattr(selection.client, "model", None) or "none",
+            selection.fallback_reason or "none",
+        )
         if selection.provider == LLMProvider.MOCK:
             return fallback, selection.provider.value, None
 
@@ -517,14 +549,34 @@ async def _synthesize(intent: str, question: str, evidence: dict[str, Any]) -> t
             # was costing a full extra round trip on every single request.
             raw = await _call_reasoning_model(selection, system_prompt, prompt)
         else:
+            LOGGER.info(
+                "analyst_llm_call_start provider=%s model=%s api_version=%s "
+                "reasoning_model=false timeout_seconds=%s",
+                selected_provider,
+                model_name or "none",
+                settings.azure_openai_api_version if selected_provider == "azure_openai" else "n/a",
+                settings.llm_timeout_seconds,
+            )
             raw = await selection.client.agenerate(
                 system_prompt=system_prompt,
                 user_prompt=prompt,
                 temperature=0.1,
                 max_tokens=700,
             )
+            LOGGER.info(
+                "analyst_llm_call_success provider=%s model=%s response_chars=%s",
+                selected_provider,
+                model_name or "none",
+                len(str(raw or "")),
+            )
 
         parsed = _parse_llm_json(raw)
+        LOGGER.info(
+            "analyst_llm_response_parsed provider=%s model=%s fields=%s",
+            selected_provider,
+            model_name or "none",
+            ",".join(sorted(parsed.keys())),
+        )
         result = _validated_model_fields(parsed, fallback)
         elapsed_ms = round((time.monotonic() - started) * 1000)
         LOGGER.info(
@@ -535,6 +587,11 @@ async def _synthesize(intent: str, question: str, evidence: dict[str, Any]) -> t
     except Exception as exc:
         reason = f"{type(exc).__name__}: {str(exc)[-400:]}"
         elapsed_ms = round((time.monotonic() - started) * 1000)
+        LOGGER.exception(
+            "Analyst synthesis exception provider=%s elapsed_ms=%s",
+            selected_provider,
+            elapsed_ms,
+        )
         LOGGER.warning(
             "Analyst synthesis fell back to deterministic response after %sms: %s",
             elapsed_ms, reason,
@@ -596,12 +653,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             "sources": evidence["sources"],
             "coverage": {"available": evidence["sources"], "unavailable": evidence["unavailable"]},
             "provider": provider,
-            # Full exception text stays server-side in the log line above --
-            # returning it to the client risks leaking internal details.
-            # The client only needs to know synthesis fell back.
             "llm_fallback_used": bool(llm_error),
             "read_only": True,
         })
+        # Temporary, opt-in diagnostics for environments without Application
+        # Insights. Never expose this in production unless explicitly enabled.
+        if llm_error and get_settings().analyst_debug_errors:
+            result["analyst_debug_error"] = llm_error[:500]
         try:
             get_tracer().trace_analyst(
                 # Langfuse requires a 32-character lowercase hexadecimal trace ID.

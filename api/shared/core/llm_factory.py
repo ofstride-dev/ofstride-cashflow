@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import json
 from dataclasses import dataclass
@@ -10,6 +11,9 @@ from typing import Protocol
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 
 from .settings import get_settings
+
+
+LOGGER = logging.getLogger("ofstride.cashflow.llm")
 
 
 def _is_configured_secret(value: str | None) -> bool:
@@ -270,6 +274,19 @@ class LLMFactory:
                 raise RuntimeError("Azure OpenAI endpoint is required.")
 
             api_key = self._settings.azure_openai_api_key
+            endpoint = self._settings.azure_openai_endpoint
+            try:
+                from urllib.parse import urlparse
+
+                endpoint_host = urlparse(endpoint).hostname or "invalid-host"
+            except Exception:
+                endpoint_host = "invalid-endpoint"
+            LOGGER.info(
+                "azure_openai_client_init endpoint_host=%s api_version=%s auth_mode=%s",
+                endpoint_host,
+                self._settings.azure_openai_api_version,
+                "api_key" if api_key else "managed_identity",
+            )
             if api_key:
                 self._azure_openai_client = AsyncAzureOpenAI(
                     api_key=api_key,
@@ -306,6 +323,7 @@ class LLMFactory:
                     azure_ad_token_provider=token_provider,
                     api_version=self._settings.azure_openai_api_version,
                 )
+            LOGGER.info("azure_openai_client_ready auth_mode=%s", "api_key" if api_key else "managed_identity")
         return self._azure_openai_client
 
     async def get_healthy_llm(self) -> tuple[LLMClient, LLMProvider]:
@@ -323,6 +341,15 @@ class LLMFactory:
         # Azure OpenAI only strictly needs an endpoint: if no API key is set, we
         # authenticate via managed identity instead (see _get_azure_openai_client).
         azure_configured = bool((self._settings.azure_openai_endpoint or "").strip())
+        LOGGER.info(
+            "llm_provider_evaluation provider=%s azure_configured=%s openai_key_configured=%s "
+            "allow_mock=%s azure_circuit_open=%s",
+            provider,
+            azure_configured,
+            openai_configured,
+            self._settings.allow_mock_provider,
+            self._is_provider_open(LLMProvider.AZURE_OPENAI),
+        )
 
         if provider == LLMProvider.MOCK.value:
             if self._settings.allow_mock_provider:
@@ -341,6 +368,11 @@ class LLMFactory:
 
             if azure_configured:
                 deployment = deployment_override or self._settings.azure_openai_deployment or self._settings.model_name
+                LOGGER.info(
+                    "llm_provider_selected provider=azure_openai deployment=%s deployment_source=%s",
+                    deployment,
+                    "analyst_override" if deployment_override else "default_setting",
+                )
                 self._record_provider_success(LLMProvider.AZURE_OPENAI)
                 return LLMSelection(
                     client=OpenAILLMClient(

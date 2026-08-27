@@ -113,6 +113,7 @@ class Settings:
     fallback_model_name: str
     analyst_llm_provider: str | None
     analyst_azure_openai_deployment: str | None
+    analyst_debug_errors: bool
     temperature: float
     max_tokens: int
 
@@ -207,6 +208,7 @@ def _build_settings() -> Settings:
         fallback_model_name=_get_str("FALLBACK_MODEL_NAME", "gpt-4o-mini") or "gpt-4o-mini",
         analyst_llm_provider=_get_str("ANALYST_LLM_PROVIDER"),
         analyst_azure_openai_deployment=_get_str("ANALYST_AZURE_OPENAI_DEPLOYMENT"),
+        analyst_debug_errors=_get_bool("ANALYST_DEBUG_ERRORS", False),
         temperature=_get_float("LLM_TEMPERATURE", 0.2),
         max_tokens=_get_int("LLM_MAX_TOKENS", 700),
         embedding_model=_get_str("EMBEDDING_MODEL", "text-embedding-3-small")
