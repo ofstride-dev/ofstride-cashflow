@@ -185,7 +185,7 @@ function CashflowShell() {
       <aside className="dashboard-sidebar hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 lg:sticky lg:top-0 lg:h-screen">
           <div className="px-5 py-6 border-b border-white/10">
           <p className="dashboard-sidebar-brand-parent">OFSTRIDE</p>
-          <h1 className="dashboard-sidebar-brand-product">CASHFLOW</h1>
+          <h1 className="dashboard-sidebar-brand-product">SERVICES</h1>
           <p className="mt-5 text-[0.65rem] font-bold uppercase tracking-[0.16em] text-slate-500">Workspace</p>
         </div>
         <div className="flex-1 overflow-y-auto px-3 py-4">
