@@ -41,7 +41,7 @@ function CashflowCompanyProfile() {
         </div>
         <h1 className="text-2xl font-semibold text-primary mb-2">Create Your Company Profile</h1>
         <p className="text-sm text-muted mb-6">
-          Tell us about your company to get started. You'll be taken to your Cashflow dashboard once this is complete.
+          Tell us about your company to get started. You'll be taken to your CashPulse dashboard once this is complete.
         </p>
 
         {error && (

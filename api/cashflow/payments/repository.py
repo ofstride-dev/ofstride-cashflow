@@ -58,7 +58,8 @@ class PaymentsRepository:
         if str(document.get("status") or "").lower() == "cancelled":
             return "Payments cannot be recorded for a cancelled document."
         try:
-            if float(amount) > float(document.get("amount") or 0):
+            gross = float(document.get("amount") or 0) + float(document.get("gst_amount") or 0)
+            if float(amount) > gross:
                 return "Payment amount cannot exceed the parent document amount."
         except (TypeError, ValueError):
             return "Parent document amount is invalid."
@@ -75,6 +76,7 @@ class PaymentsRepository:
             "company_id": context.company_id,
             "created_by": context.user_id,
             "transaction_date": payload.get("transaction_date") or datetime.now().strftime("%Y-%m-%d"),
+            "transaction_type": payload.get("transaction_type") or ("INFLOW" if payload.get("invoice_id") else "OUTFLOW"),
         }
         try:
             return self._client.table("cashflow_transactions").insert(transaction).execute()

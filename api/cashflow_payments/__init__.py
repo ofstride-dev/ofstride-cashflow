@@ -63,6 +63,11 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             return create_response(500, False, error="Cashflow payment tables are not configured.")
         if not parent.data:
             return create_response(404, False, error="Payment parent resource not found.")
+        existing = client.table("cashflow_transactions").select("amount").eq("company_id", context.company_id).eq("invoice_id" if invoice_id else "bill_id", resource_id).execute()
+        gross = float(parent.data[0].get("amount") or 0) + float(parent.data[0].get("gst_amount") or 0)
+        already_paid = sum(float(row.get("amount") or 0) for row in (existing.data or []))
+        if amount > max(gross - already_paid, 0):
+            return create_response(400, False, error="Payment amount cannot exceed the remaining balance due.")
         validation_error = repository.validate_payment(parent, amount, data.get("transaction_date"))
         if validation_error:
             return create_response(400, False, error=validation_error)
@@ -78,6 +83,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             result = repository.create_transaction(context, payload)
         except MissingTableError:
             return create_response(500, False, error="Cashflow payment tables are not configured.")
+        if already_paid + amount >= gross:
+            table = "cashflow_invoices" if invoice_id else "cashflow_bills"
+            client.table(table).update({"status": "paid"}).eq("company_id", context.company_id).eq("id", resource_id).execute()
         audit.record(
             client,
             context,

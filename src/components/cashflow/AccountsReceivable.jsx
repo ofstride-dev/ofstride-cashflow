@@ -9,6 +9,14 @@ import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
 
+const GST_SERVICE_RATES = [
+  { value: '0', label: 'GST-exempt service (0%)' },
+  { value: '5', label: 'Restaurant / transport service (5%)' },
+  { value: '12', label: 'Specified service (12%)' },
+  { value: '18', label: 'Professional / business service (18%)' },
+  { value: '28', label: 'Luxury / specified service (28%)' },
+];
+
 function TableSkeleton() {
   return (
     <div className="p-6 space-y-3" aria-busy="true" aria-live="polite">
@@ -32,7 +40,7 @@ export default function AccountsReceivable() {
   const [formData, setFormData] = useState({
     customer_name: '', customer_gstin: '', invoice_number: '', 
     invoice_date: new Date().toISOString().split('T')[0], 
-    amount: '', gst_amount: '', irn_number: '', is_proforma: false, notes: '', item_services: ['']
+    due_date: '', amount: '', gst_amount: '', gst_mode: 'percentage', gst_rate: '18', irn_number: '', is_proforma: false, notes: '', item_services: ['']
   });
 
   const normalizeItemServices = (value) => {
@@ -147,18 +155,31 @@ export default function AccountsReceivable() {
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData({ ...formData, [name]: type === 'checkbox' ? checked : value });
+    const next = { ...formData, [name]: type === 'checkbox' ? checked : value };
+    if (name === 'amount' || name === 'gst_rate' || name === 'gst_mode') {
+      const rate = name === 'gst_rate' ? Number(value) : Number(next.gst_rate || 0);
+      const net = Number(name === 'amount' ? value : next.amount) || 0;
+      if ((name === 'gst_mode' ? value : next.gst_mode) === 'percentage') {
+        next.gst_amount = net > 0 ? (net * rate / 100).toFixed(2) : '';
+      } else if (name === 'gst_mode') {
+        next.gst_amount = net > 0 ? (net * rate / 100).toFixed(2) : '';
+      }
+    }
+    setFormData(next);
   };
 
   const handleCreateInvoice = async (e) => {
     e.preventDefault();
     const requestIdentityKey = authIdentityKey;
+    const invoicePayload = { ...formData };
+    delete invoicePayload.gst_mode;
+    delete invoicePayload.gst_rate;
     setSaving(true);
     try {
       const res = await cashflowFetch('/cashflow/ar/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(invoicePayload)
       });
       const parsed = await parseCashflowResponse(res);
       if (activeIdentityKeyRef.current !== requestIdentityKey) return;
@@ -167,7 +188,7 @@ export default function AccountsReceivable() {
         setFormData({ 
           customer_name: '', customer_gstin: '', invoice_number: '', 
           invoice_date: new Date().toISOString().split('T')[0], 
-          amount: '', gst_amount: '', irn_number: '', is_proforma: false, notes: '', item_services: ['']
+           due_date: '', amount: '', gst_amount: '', gst_mode: 'percentage', gst_rate: '18', irn_number: '', is_proforma: false, notes: '', item_services: ['']
         });
       } else {
         throw new Error(parsed.error || `Server error ${parsed.status}`);
@@ -249,6 +270,7 @@ export default function AccountsReceivable() {
         invoice_number: inv.invoice_number || '',
         invoice_date: inv.invoice_date || '',
         due_date: inv.due_date || '',
+        balance_due: Number(inv.balance_due || 0).toFixed(2),
         amount: amount.toFixed(2),
         gst_amount: gst.toFixed(2),
         total_invoice_value: total.toFixed(2),
@@ -267,8 +289,8 @@ export default function AccountsReceivable() {
         { header: 'Invoice Date', key: 'invoice_date' },
         { header: 'Due Date', key: 'due_date' },
         { header: 'Net Amount', key: 'amount' },
-        { header: 'Net Amount', key: 'amount' },
         { header: 'Total Invoice Value', key: 'total_invoice_value' },
+        { header: 'Balance Due', key: 'balance_due' },
         { header: 'Status', key: 'status' },
         { header: 'Is Proforma', key: 'is_proforma' },
         { header: 'IRN Number', key: 'irn_number' },
@@ -279,7 +301,7 @@ export default function AccountsReceivable() {
 
   const totalOutstanding = invoices
     .filter(inv => inv.status !== 'paid' && !inv.is_proforma)
-    .reduce((acc, curr) => acc + (parseFloat(curr.amount || 0) + parseFloat(curr.gst_amount || 0)), 0);
+    .reduce((acc, curr) => acc + Number(curr.balance_due ?? (parseFloat(curr.amount || 0) + parseFloat(curr.gst_amount || 0))), 0);
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -315,12 +337,34 @@ export default function AccountsReceivable() {
             <input id="ar-invoice_date" type="date" name="invoice_date" value={formData.invoice_date} onChange={handleInputChange} required className="input-ui" />
           </div>
           <div>
+            <label className="label-ui" htmlFor="ar-due_date">Due Date</label>
+            <input id="ar-due_date" type="date" name="due_date" value={formData.due_date} onChange={handleInputChange} required className="input-ui" />
+          </div>
+          <div>
             <label className="label-ui" htmlFor="ar-amount">Net Amount (₹)</label>
             <input id="ar-amount" type="number" name="amount" value={formData.amount} onChange={handleInputChange} required className="input-ui" />
           </div>
           <div>
+            <label className="label-ui" htmlFor="ar-gst_mode">GST Calculation</label>
+            <select id="ar-gst_mode" name="gst_mode" value={formData.gst_mode} onChange={handleInputChange} className="input-ui">
+              <option value="percentage">Enter GST percentage</option>
+              <option value="service">Select service category</option>
+            </select>
+          </div>
+          <div>
+            <label className="label-ui" htmlFor="ar-gst_rate">{formData.gst_mode === 'service' ? 'Service GST Rate' : 'GST Rate (%)'}</label>
+            {formData.gst_mode === 'service' ? (
+              <select id="ar-gst_rate" name="gst_rate" value={formData.gst_rate} onChange={handleInputChange} className="input-ui">
+                {GST_SERVICE_RATES.map((rate) => <option key={rate.value} value={rate.value}>{rate.label}</option>)}
+              </select>
+            ) : (
+              <input id="ar-gst_rate" type="number" name="gst_rate" min="0" max="100" step="0.01" value={formData.gst_rate} onChange={handleInputChange} className="input-ui" />
+            )}
+          </div>
+          <div>
             <label className="label-ui" htmlFor="ar-gst_amount">GST Amount (₹)</label>
-            <input id="ar-gst_amount" type="number" name="gst_amount" value={formData.gst_amount} onChange={handleInputChange} className="input-ui" />
+            <input id="ar-gst_amount" type="number" name="gst_amount" value={formData.gst_amount} readOnly className="input-ui bg-slate-50" aria-describedby="ar-gst-help" />
+            <p id="ar-gst-help" className="mt-1 text-xs text-muted">Calculated on the net amount before GST. Confirm the rate against the service SAC classification.</p>
           </div>
           <div>
             <label className="label-ui" htmlFor="ar-irn_number">IRN Number</label>
@@ -386,15 +430,14 @@ export default function AccountsReceivable() {
         {loading ? (
           <TableSkeleton />
         ) : (
-          <table className="table-ui whitespace-nowrap">
+          <table className="table-ui whitespace-nowrap text-sm">
             <thead>
               <tr>
                 <th>Customer</th>
                 <th>Invoice #</th>
-                <th>Date</th>
-                <th>Net</th>
-                <th>GST</th>
+                <th>Dates</th>
                 <th>Gross</th>
+                <th>Balance Due</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -417,16 +460,15 @@ export default function AccountsReceivable() {
                       <div className="font-semibold">{inv.invoice_number}</div>
                       {inv.irn_number && <div className="mt-1 text-xs text-muted">IRN: {inv.irn_number.substring(0, 10)}...</div>}
                     </td>
-                    <td>{inv.invoice_date}</td>
-                    <td className="tabular-nums">₹{net.toLocaleString('en-IN')}</td>
-                    <td className="font-semibold text-info tabular-nums">₹{gst.toLocaleString('en-IN')}</td>
-                    <td className="font-semibold text-primary tabular-nums">₹{total.toLocaleString('en-IN')}</td>
+                    <td className="leading-tight"><span className="block text-xs text-muted">Invoice: {inv.invoice_date}</span><strong className="mt-1 block text-xs text-primary">Due: {inv.due_date || '—'}</strong></td>
+                    <td className="font-semibold text-primary tabular-nums"><details><summary className="cursor-pointer">₹{total.toLocaleString('en-IN')}</summary><span className="block text-xs text-muted">Net ₹{net.toLocaleString('en-IN')} · GST ₹{gst.toLocaleString('en-IN')}</span></details></td>
+                    <td className="font-semibold text-amber-700 tabular-nums">₹{Number(inv.balance_due ?? total).toLocaleString('en-IN')}</td>
                     <td>
-                      <span className={`badge-ui ${inv.status === 'paid' ? 'badge-ui-success' : 'badge-ui-neutral'}`}>
-                        {inv.status}
+                      <span className={`badge-ui ${inv.status === 'paid' || Number(inv.balance_due ?? total) <= 0 ? 'badge-ui-success' : inv.aging_category === 'Overdue' ? 'badge-ui-danger' : inv.aging_category === 'Due Soon' ? 'badge-ui-warning' : 'badge-ui-success'}`}>
+                        {inv.status === 'paid' || Number(inv.balance_due ?? total) <= 0 ? 'Paid' : (inv.aging_label || inv.status)}
                       </span>
                     </td>
-                    <td>
+                    <td className="sticky right-0 bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,.35)]">
                       <div className="flex flex-wrap items-center gap-2">
                         {inv.status === 'pending' && !inv.is_proforma && isAdmin && (
                           <button
@@ -452,7 +494,7 @@ export default function AccountsReceivable() {
               })}
               {!loading && invoices.length === 0 && (
                 <tr>
-                  <td colSpan="8" className="py-12 text-center text-muted">
+                  <td colSpan="7" className="py-12 text-center text-muted">
                     No invoices created yet.
                   </td>
                 </tr>

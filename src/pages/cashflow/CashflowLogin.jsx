@@ -150,7 +150,7 @@ function CashflowLogin() {
             <div className="relative z-10">
             <div className="login-service-label">
               <span className="login-service-icon"><img src={ofstrideLogo} alt="Ofstride Services logo" /></span>
-              <span className="login-service-copy"><strong>Cashflow</strong><small>by OFSTRIDE SERVICES</small></span>
+              <span className="login-service-copy"><strong>CashPulse</strong><small>by OFSTRIDE SERVICES</small></span>
             </div>
             <div className="login-inline-card">
               <h1>{authMode === "sign-in" ? "Sign in to your workspace" : "Get started in under a minute"}</h1>
@@ -175,8 +175,8 @@ function CashflowLogin() {
               <span className="login-board-kicker">Your cashflow, in motion</span>
               <h2>See the signal<br /><span>behind every rupee.</span></h2>
               <p>Track inflow, outflow, and runway with a living view of your business finances.</p>
-            <div className="login-finance-board" aria-label="Animated mock cashflow dashboard">
-              <div className="login-board-header"><div><span className="login-board-kicker">Cashflow pulse</span><strong>₹ 18.42L</strong><small>Net position <b>+12.8%</b> this month</small></div></div>
+              <div className="login-finance-board" aria-label="Animated mock CashPulse dashboard">
+              <div className="login-board-header"><div><span className="login-board-kicker">CashPulse pulse</span><strong>₹ 18.42L</strong><small>Net position <b>+12.8%</b> this month</small></div></div>
               <div className="login-board-chart">
                 <div className="login-chart-grid"><span>20L</span><span>15L</span><span>10L</span><span>5L</span><span>0</span></div>
                 <svg viewBox="0 0 540 170" role="img" aria-label="Rising inflow and outflow trend graph" preserveAspectRatio="none">

@@ -71,6 +71,36 @@ export default function BankStatementReconcile() {
   const [columnWarnings, setColumnWarnings] = useState([]);
   const [rowIssuesCount, setRowIssuesCount] = useState(0);
   const [comparisonMode, setComparisonMode] = useState('');
+  const [addingRowId, setAddingRowId] = useState('');
+  const [rowCategories, setRowCategories] = useState({});
+
+  const addToBooks = async (row) => {
+    if (!row?.row_id || addingRowId) return;
+    const defaultCategory = row.direction === 'debit' ? 'Bank Fee' : 'Other Income';
+    const category = rowCategories[row.row_id] || defaultCategory;
+    setAddingRowId(row.row_id);
+    setError('');
+    try {
+      const res = await cashflowFetch('/reconcile/bank/add-to-books', {
+        method: 'POST',
+        body: JSON.stringify({ row_id: row.row_id, category }),
+      });
+      const payload = await parseJsonBodySafe(res);
+      if (!res.ok || !payload?.success) {
+        throw new Error(payload?.error || `Could not add transaction (status ${res.status}).`);
+      }
+      setRows((previous) => previous.filter((item) => item.row_id !== row.row_id));
+      setSummary((previous) => previous ? {
+        ...previous,
+        unexpected_in_bank_statement: Math.max(Number(previous.unexpected_in_bank_statement || 0) - 1, 0),
+        matched: Number(previous.matched || 0) + 1,
+      } : previous);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add transaction to books.');
+    } finally {
+      setAddingRowId('');
+    }
+  };
 
   const onFileChange = (e) => {
     const next = e.target.files?.[0] || null;
@@ -124,6 +154,7 @@ export default function BankStatementReconcile() {
       setColumnWarnings(payload.data?.column_warnings || []);
       setRowIssuesCount(Number(payload.data?.row_issues_count || 0));
       setComparisonMode(payload.data?.comparison_mode || '');
+      setRowCategories({});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Reconcile failed.');
     } finally {
@@ -313,6 +344,7 @@ export default function BankStatementReconcile() {
                   <th className="px-2 py-2">Party</th>
                   <th className="px-2 py-2 text-right">Amount</th>
                   <th className="px-2 py-2">Status</th>
+                  <th className="px-2 py-2">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -326,6 +358,33 @@ export default function BankStatementReconcile() {
                       <span className={`inline-flex px-2 py-1 rounded-full border text-xs font-medium ${statusTone(row.status)}`}>
                         {row.status}
                       </span>
+                    </td>
+                    <td className="px-2 py-2">
+                      {row.status === 'unexpected_in_bank_statement' ? (
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={rowCategories[row.row_id] || (row.direction === 'debit' ? 'Bank Fee' : 'Other Income')}
+                            onChange={(e) => setRowCategories((previous) => ({ ...previous, [row.row_id]: e.target.value }))}
+                            className="input-ui min-w-[9rem] !py-1.5 text-xs"
+                            aria-label="Transaction category"
+                          >
+                            <option>Bank Fee</option>
+                            <option>Subscription</option>
+                            <option>Other Expense</option>
+                            <option>Other Income</option>
+                            <option>Interest Income</option>
+                            <option>Uncategorized</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => addToBooks(row)}
+                            disabled={addingRowId === row.row_id}
+                            className="btn-ui btn-ui-primary whitespace-nowrap !px-3 !py-1.5 text-xs"
+                          >
+                            {addingRowId === row.row_id ? 'Adding…' : 'Add to Books'}
+                          </button>
+                        </div>
+                      ) : '—'}
                     </td>
                   </tr>
                 ))}

@@ -226,11 +226,21 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             if current_status == "paid":
                 return func.HttpResponse(_safe_json({"ok": False, "error": "Invoice is already paid"}), mimetype="application/json", status_code=400)
 
+            requested_amount = _to_float(data.get("amount"), 0.0)
+            if requested_amount <= 0:
+                return func.HttpResponse(_safe_json({"ok": False, "error": "A positive payment amount is required"}), mimetype="application/json", status_code=400)
+            tx_sum_res = supabase.table('cashflow_transactions').select('amount').eq('company_id', company_id).eq('invoice_id', invoice_id).execute()
+            already_collected = sum(_to_float(t.get("amount"), 0.0) for t in (tx_sum_res.data or []))
+            invoice_total = round(_to_float(invoice.get("amount"), 0.0) + _to_float(invoice.get("gst_amount"), 0.0), 2)
+            if requested_amount > max(invoice_total - already_collected, 0):
+                return func.HttpResponse(_safe_json({"ok": False, "error": "Payment amount cannot exceed the remaining balance due"}), mimetype="application/json", status_code=400)
+
             new_transaction = {
                 "company_id": company_id,
                 "invoice_id": invoice_id,
                 "transaction_date": data.get("transaction_date", datetime.now().strftime("%Y-%m-%d")),
-                "amount": _to_float(data.get("amount"), 0.0),
+                "amount": requested_amount,
+                "transaction_type": "INFLOW",
                 "payment_mode": data.get("payment_mode", "bank_transfer"),
                 "reference_no": data.get("reference_no", ""),
                 "created_by": identity.get("user_id"),
@@ -247,9 +257,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     )
                 raise
 
-            tx_sum_res = supabase.table('cashflow_transactions').select('amount').eq('company_id', company_id).eq('invoice_id', invoice_id).execute()
             total_collected = round(sum(_to_float(t.get("amount"), 0.0) for t in (tx_sum_res.data or [])), 2)
-            invoice_total = round(_to_float(invoice.get("amount"), 0.0) + _to_float(invoice.get("gst_amount"), 0.0), 2)
+            total_collected = round(total_collected + requested_amount, 2)
 
             updated_invoice = None
             if total_collected >= invoice_total and invoice_total > 0:

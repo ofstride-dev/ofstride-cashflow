@@ -185,8 +185,8 @@ function CashflowShell() {
       <aside className="dashboard-sidebar hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 lg:sticky lg:top-0 lg:h-screen">
           <div className="px-5 py-6 border-b border-white/10">
           <p className="dashboard-sidebar-brand-parent">Ofstride Services</p>
-          <h1 className="dashboard-sidebar-brand-product">Cashflow</h1>
-          <p className="mt-5 text-[0.65rem] font-bold uppercase tracking-[0.16em] text-slate-500">Workspace</p>
+          <h1 className="dashboard-sidebar-brand-product">CashPulse</h1>
+          <p className="mt-5 text-[0.75rem] font-bold uppercase tracking-[0.16em] text-slate-500">Workspace</p>
         </div>
         <div className="flex-1 overflow-y-auto px-3 py-4">
           <NavLinks isActivePath={isActivePath} />
@@ -225,7 +225,7 @@ function CashflowShell() {
             <div className="flex items-center justify-between px-5 py-5 border-b border-white/10">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">OfStride</p>
-                <h1 className="text-lg font-bold text-white mt-1">Cashflow</h1>
+                <h1 className="text-lg font-bold text-white mt-1">CashPulse</h1>
               </div>
               <button
                 type="button"

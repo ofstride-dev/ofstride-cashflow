@@ -30,7 +30,7 @@ class DashboardRepository:
         start_key, end_key = start_date.isoformat(), end_date.isoformat()
         return {
             "transactions": self._query(
-                "cashflow_transactions", "amount,invoice_id,bill_id", context,
+                "cashflow_transactions", "amount,invoice_id,bill_id,transaction_type", context,
                 transaction_date=("gte", start_key), transaction_date_end=("lte", end_key),
             ),
             "petty_cash": self._query(
@@ -38,13 +38,17 @@ class DashboardRepository:
                 entry_date=("gte", start_key), entry_date_end=("lte", end_key),
             ),
             "pending_invoices": self._query(
-                "cashflow_invoices", "amount,gst_amount", context, status="pending",
-                is_proforma=False, invoice_date=("gte", start_key), invoice_date_end=("lte", end_key),
+                "cashflow_invoices",
+                "id,amount,gst_amount,status,is_proforma,due_date,invoice_date", context, status=("in", ["pending", "approved", "overdue"]), is_proforma=False,
             ),
             "payable_bills": self._query(
-                "cashflow_bills", "amount,gst_amount", context,
-                status=("in", ["pending", "approved"]), bill_date=("gte", start_key), bill_date_end=("lte", end_key),
+                "cashflow_bills",
+                "id,amount,gst_amount,status,due_date,bill_date", context,
+                status=("in", ["pending", "approved", "overdue"]),
             ),
+            "accrued_invoices": self._query("cashflow_invoices", "amount,gst_amount,invoice_date,is_proforma", context, invoice_date=("gte", start_key), invoice_date_end=("lte", end_key), is_proforma=False),
+            "accrued_bills": self._query("cashflow_bills", "amount,gst_amount,bill_date", context, bill_date=("gte", start_key), bill_date_end=("lte", end_key)),
+            "all_transactions": self._query("cashflow_transactions", "amount,invoice_id,bill_id,transaction_type", context),
             "msme_candidates": self._query(
                 "cashflow_bills", "due_date,amount,gst_amount,cashflow_entities!cashflow_bills_vendor_id_fkey(name,msme_category)", context,
                 status=("in", ["pending", "approved"]), due_date=("gte", start_key), due_date_end=("lte", end_key),
@@ -56,7 +60,8 @@ class DashboardRepository:
         start_key, end_key = start_date.isoformat(), end_date.isoformat()
         return {
             "transactions": self._query(
-                "cashflow_transactions", "transaction_date,amount,invoice_id,bill_id", context,
+                "cashflow_transactions",
+                "transaction_date,amount,invoice_id,bill_id,transaction_type", context,
                 transaction_date=("gte", start_key), transaction_date_end=("lte", end_key),
             ),
             "petty_cash": self._query(

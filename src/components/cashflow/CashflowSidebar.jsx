@@ -30,8 +30,8 @@ export default function CashflowSidebar({ mobileOpen, onClose }) {
         </div>
         {showText && (
           <div className="flex flex-col overflow-hidden">
-            <span className="text-of-sidebar-active font-semibold text-sm leading-tight truncate">Ofstride</span>
-            <span className="text-[11px] text-of-sidebar-text/60">Cashflow</span>
+            <span className="text-of-sidebar-active font-semibold text-lg leading-tight truncate">OfStride Services</span>
+            <span className="text-sm text-of-sidebar-text/60">CashPulse</span>
           </div>
         )}
         {showText ? (
@@ -88,7 +88,7 @@ export default function CashflowSidebar({ mobileOpen, onClose }) {
           </div>
           {showText && (
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-of-sidebar-active truncate">
+              <p className="text-base font-medium text-of-sidebar-active truncate">
                 {profile?.company_name || 'Workspace'}
               </p>
               <p className="text-[11px] text-of-sidebar-text/60 truncate">

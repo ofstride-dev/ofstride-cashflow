@@ -13,6 +13,7 @@ const FIELD_ROWS = [
   ['Vendor Name', 'vendor_name', 'text'],
   ['Invoice #', 'bill_number', 'text'],
   ['Invoice Date', 'bill_date', 'date'],
+  ['Payment Terms (Days)', 'payment_terms_days', 'number'],
   ['Total Amount Before GST', 'amount_before_gst', 'number'],
   ['GST Total', 'gst_amount', 'number'],
   ['Gross Total (Net + GST)', 'total_amount', 'number'],
@@ -44,6 +45,7 @@ export default function AccountsPayable() {
     vendor_name: '',
     bill_number: '',
     bill_date: '',
+    payment_terms_days: '30',
     amount_before_gst: '',
     gst_amount: '',
     total_amount: '',
@@ -142,6 +144,7 @@ export default function AccountsPayable() {
             vendor_name: payload.vendor_name || '',
             bill_number: payload.bill_number || '',
             bill_date: payload.bill_date || '',
+            payment_terms_days: payload.payment_terms_days ?? '30',
             amount_before_gst: payload.amount_before_gst ?? Math.max((Number(payload.amount || 0) - Number(payload.gst_amount || 0)), 0),
             gst_amount: payload.gst_amount || 0,
             total_amount: payload.total_amount ?? (payload.amount || 0),
@@ -213,6 +216,22 @@ export default function AccountsPayable() {
     }
   };
 
+  const handleRecordPayment = async (bill) => {
+    const gross = Number(bill.amount || 0);
+    const balance = Number(bill.balance_due ?? gross);
+    if (balance <= 0) return;
+    const value = window.prompt(`Record vendor payment for ${bill.bill_number}\nEnter amount (Balance due: ₹${balance.toFixed(2)}):`, balance.toFixed(2));
+    if (!value) return;
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    try {
+      const res = await cashflowFetch('/cashflow/payments/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bill_id: bill.id, amount, payment_mode: 'bank_transfer' }) });
+      const parsed = await parseCashflowResponse(res);
+      if (parsed.ok) await fetchInvoices(() => activeIdentityKeyRef.current === authIdentityKey);
+      else console.error('AP payment failed:', parsed.error);
+    } catch (error) { console.error('AP payment failed:', error); }
+  };
+
   const handleSaveInvoice=async(e)=>{
     e.preventDefault();
     const requestIdentityKey = authIdentityKey;
@@ -229,7 +248,7 @@ export default function AccountsPayable() {
       if (activeIdentityKeyRef.current !== requestIdentityKey) return;
       if(parsed.ok){
         setInvoices((previousInvoices) => [parsed.data, ...previousInvoices]);
-        setFormData({vendor_name:'',bill_number:'',bill_date:'',amount_before_gst:'',gst_amount:'',total_amount:'',tds_section:'NONE'});
+        setFormData({vendor_name:'',bill_number:'',bill_date:'',payment_terms_days:'30',amount_before_gst:'',gst_amount:'',total_amount:'',tds_section:'NONE'});
       } else {
         const msg = String(parsed.error || 'Unable to save bill.');
         console.error('AP save failed:', msg);
@@ -257,6 +276,8 @@ export default function AccountsPayable() {
         bill_number: inv.bill_number || '',
         bill_date: inv.bill_date || '',
         due_date: inv.due_date || '',
+        payment_terms_days: inv.payment_terms_days ?? '',
+        balance_due: Number(inv.balance_due || 0).toFixed(2),
         gross_amount: gross.toFixed(2),
         gst_amount: gst.toFixed(2),
         tds_amount: tds.toFixed(2),
@@ -272,10 +293,12 @@ export default function AccountsPayable() {
         { header: 'Bill Number', key: 'bill_number' },
         { header: 'Bill Date', key: 'bill_date' },
         { header: 'Due Date', key: 'due_date' },
+        { header: 'Payment Terms (Days)', key: 'payment_terms_days' },
         { header: 'Gross Amount', key: 'gross_amount' },
         { header: 'GST Amount', key: 'gst_amount' },
         { header: 'TDS Amount', key: 'tds_amount' },
         { header: 'Net Amount', key: 'net_amount' },
+        { header: 'Balance Due', key: 'balance_due' },
         { header: 'Status', key: 'status' },
       ],
       rows
@@ -372,10 +395,10 @@ export default function AccountsPayable() {
         {loading ? (
           <TableSkeleton />
         ) : (
-          <table className="table-ui">
+          <table className="table-ui text-sm">
             <thead>
               <tr>
-                {['Vendor', 'Bill #', 'Due Date', 'Gross', 'GST', 'TDS', 'Net', 'Status', 'Actions'].map((h) => (
+                {['Vendor', 'Bill #', 'Dates', 'Gross', 'Balance Due', 'Status', 'Actions'].map((h) => (
                   <th key={h}>{h}</th>
                 ))}
               </tr>
@@ -393,15 +416,13 @@ export default function AccountsPayable() {
                   <tr key={inv.id}>
                     <td className="font-semibold text-primary">{vendor}</td>
                     <td>{inv.bill_number}</td>
-                    <td>{inv.due_date}</td>
-                    <td className="font-semibold text-primary tabular-nums">₹{gross.toLocaleString('en-IN')}</td>
-                    <td className="font-semibold text-info tabular-nums">₹{gst.toLocaleString('en-IN')}</td>
-                    <td className="text-danger tabular-nums">-₹{(+inv.tds_amount || 0).toLocaleString('en-IN')}</td>
-                    <td className="font-bold text-success tabular-nums">₹{netBeforeGst.toLocaleString('en-IN')}</td>
+                    <td className="leading-tight"><span className="block text-xs text-muted">Bill: {inv.bill_date}</span><strong className="mt-1 block text-xs text-primary">Due: {inv.due_date || '—'}</strong></td>
+                    <td className="font-semibold text-primary tabular-nums"><details><summary className="cursor-pointer">₹{gross.toLocaleString('en-IN')}</summary><span className="block text-xs text-muted">Net ₹{netBeforeGst.toLocaleString('en-IN')} · GST ₹{gst.toLocaleString('en-IN')} · TDS ₹{(+inv.tds_amount || 0).toLocaleString('en-IN')}</span></details></td>
+                    <td className="font-bold text-amber-700 tabular-nums">₹{Number(inv.balance_due ?? gross).toLocaleString('en-IN')}</td>
                     <td>
-                      <span className="badge-ui badge-ui-warning">{inv.status}</span>
+                       <span className={`badge-ui ${inv.status === 'paid' || Number(inv.balance_due ?? gross) <= 0 ? 'badge-ui-success' : inv.aging_category === 'Overdue' ? 'badge-ui-danger' : inv.aging_category === 'Due Soon' ? 'badge-ui-warning' : 'badge-ui-success'}`}>{inv.status === 'paid' || Number(inv.balance_due ?? gross) <= 0 ? 'Paid' : (inv.aging_label || inv.status)}</span>
                     </td>
-                    <td>
+                    <td className="sticky right-0 bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,.35)]">
                       {pending && isAdmin ? (
                         <button
                           type="button"
@@ -414,13 +435,16 @@ export default function AccountsPayable() {
                       ) : (
                         <span className="text-xs text-muted">-</span>
                       )}
+                      {Number(inv.balance_due ?? gross) > 0 && (
+                        <button type="button" onClick={() => handleRecordPayment(inv)} className="btn-ui btn-ui-sm btn-ui-info">Pay</button>
+                      )}
                     </td>
                   </tr>
                 );
               })}
               {!loading && invoices.length === 0 && (
                 <tr>
-                  <td colSpan="9" className="py-10 text-center text-muted">
+                  <td colSpan="7" className="py-10 text-center text-muted">
                     No AP bills recorded yet.
                   </td>
                 </tr>

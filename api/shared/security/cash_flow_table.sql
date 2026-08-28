@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS public.cashflow_bills (
     bill_number TEXT NOT NULL,
     bill_date DATE NOT NULL,
     due_date DATE NOT NULL,
+    payment_terms_days INTEGER NOT NULL DEFAULT 30 CHECK (payment_terms_days >= 0),
     amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
     gst_amount NUMERIC(12, 2) DEFAULT 0.00,
     tds_amount NUMERIC(12, 2) DEFAULT 0.00,
@@ -53,6 +54,9 @@ CREATE TABLE IF NOT EXISTS public.cashflow_bills (
     created_by UUID REFERENCES auth.users(id),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.cashflow_bills
+    ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER NOT NULL DEFAULT 30;
 
 -- 4. AR INVOICES (Customers)
 CREATE TABLE IF NOT EXISTS public.cashflow_invoices (
@@ -87,11 +91,20 @@ CREATE TABLE IF NOT EXISTS public.cashflow_transactions (
     invoice_id UUID REFERENCES public.cashflow_invoices(id) ON DELETE SET NULL,
     transaction_date DATE NOT NULL,
     amount NUMERIC(12, 2) NOT NULL,
+    transaction_type TEXT NOT NULL DEFAULT 'INFLOW' CHECK (transaction_type IN ('INFLOW', 'OUTFLOW')),
     payment_mode TEXT NOT NULL DEFAULT 'bank_transfer',
     reference_no TEXT,
+    category TEXT NOT NULL DEFAULT 'Uncategorized',
     created_by UUID REFERENCES auth.users(id),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.cashflow_transactions ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Uncategorized';
+
+ALTER TABLE public.cashflow_transactions ADD COLUMN IF NOT EXISTS transaction_type TEXT;
+UPDATE public.cashflow_transactions SET transaction_type = CASE WHEN invoice_id IS NOT NULL THEN 'INFLOW' WHEN bill_id IS NOT NULL THEN 'OUTFLOW' ELSE 'INFLOW' END WHERE transaction_type IS NULL;
+ALTER TABLE public.cashflow_transactions ALTER COLUMN transaction_type SET DEFAULT 'INFLOW';
+ALTER TABLE public.cashflow_transactions ALTER COLUMN transaction_type SET NOT NULL;
 
 -- 6. PETTY CASH & AUTOCATEGORIZATION LEDGER
 CREATE TABLE IF NOT EXISTS public.cashflow_petty_cash (

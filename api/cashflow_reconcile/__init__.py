@@ -373,12 +373,46 @@ def _analyze(req: func.HttpRequest, auth: dict[str, Any]) -> func.HttpResponse:
         # the existing database status constraint remains valid.
         details = [{"bank": item, "platform": None, "status": "matched", "notes": "Parsed bank statement; platform comparison was not requested"} for item in bank]
     summary = {"total_bank_rows": len(bank), "total_platform_rows": len(platform), **counts, "balance_warnings": warnings[:20], "comparison_mode": "platform" if compare else "bank_only"}
-    run_id = _persist(get_supabase_client(), auth["company_id"], auth.get("identity") or {}, start, end, name, Path(name).suffix.lower(), summary, details)
+    client = get_supabase_client()
+    run_id = _persist(client, auth["company_id"], auth.get("identity") or {}, start, end, name, Path(name).suffix.lower(), summary, details)
+    persisted_rows = client.table("cashflow_bank_reconcile_rows").select("id,source_side,voucher_number,voucher_date,party_name,amount,status").eq("run_id", run_id).eq("company_id", auth["company_id"]).execute().data or []
+    bank_row_by_key = {(r.get("voucher_number") or "", r.get("voucher_date") or "", round(float(r.get("amount") or 0), 2)): r for r in persisted_rows if r.get("source_side") == "bank"}
     samples = []
     for d in details:
         if d["status"] != "matched":
-            item = d.get("platform") or d.get("bank") or {}; samples.append({"voucher_number": item.get("voucher_number") or item.get("reference"), "voucher_date": item.get("voucher_date") or item.get("transaction_date"), "party_name": item.get("party_name") or item.get("description"), "amount": item.get("amount", 0), "status": d["status"], "notes": d.get("notes")})
+            item = d.get("platform") or d.get("bank") or {}; reference = item.get("voucher_number") or item.get("reference"); voucher_date = item.get("voucher_date") or item.get("transaction_date"); amount = item.get("amount", 0); persisted = bank_row_by_key.get((reference or "", voucher_date or "", round(float(amount or 0), 2)))
+            samples.append({"row_id": persisted.get("id") if persisted else None, "direction": item.get("direction"), "voucher_number": reference, "voucher_date": voucher_date, "party_name": item.get("party_name") or item.get("description"), "amount": amount, "status": d["status"], "notes": d.get("notes")})
     return _response({"success": True, "data": {"run_id": run_id, "summary": summary, "sample_mismatches": samples[:50], "uploaded_rows": uploaded, "column_warnings": warnings[:20], "row_issues_count": sum(1 for row in uploaded if row["validation_issues"]), "comparison_mode": "platform" if compare else "bank_only"}})
+
+
+def _add_to_books(req: func.HttpRequest, auth: dict[str, Any]) -> func.HttpResponse:
+    try:
+        body = req.get_json()
+    except ValueError:
+        return _error("Request body must be valid JSON")
+    row_id = _text(body.get("row_id"))
+    category = _text(body.get("category")) or "Uncategorized"
+    if not row_id:
+        return _error("row_id is required")
+    client = get_supabase_client()
+    row_response = client.table("cashflow_bank_reconcile_rows").select("*").eq("id", row_id).eq("company_id", auth["company_id"]).limit(1).execute()
+    row = (row_response.data or [None])[0]
+    if not row or row.get("source_side") != "bank":
+        return _error("Bank reconciliation row not found", 404)
+    if row.get("status") != "unexpected_in_bank_statement":
+        return _error("Only unexpected bank transactions can be added to books", 409)
+    raw = row.get("raw_data") or {}
+    direction = _text(raw.get("direction")).lower()
+    transaction = {
+        "company_id": auth["company_id"], "created_by": (auth.get("identity") or {}).get("user_id"),
+        "transaction_date": row.get("voucher_date"), "amount": float(row.get("amount") or 0),
+        "transaction_type": "INFLOW" if direction == "credit" else "OUTFLOW",
+        "payment_mode": "bank_transfer", "reference_no": row.get("voucher_number") or "",
+        "category": category,
+    }
+    inserted = client.table("cashflow_transactions").insert(transaction).execute()
+    client.table("cashflow_bank_reconcile_rows").update({"status": "matched", "notes": f"Added to books as {category}"}).eq("id", row_id).eq("company_id", auth["company_id"]).execute()
+    return _response({"success": True, "data": {"transaction": (inserted.data or [None])[0], "row_id": row_id}} , 201)
 
 
 def _export(req: func.HttpRequest, auth: dict[str, Any]) -> func.HttpResponse:
@@ -414,6 +448,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     action = req.route_params.get("action") or ""
     try:
         if req.method == "POST" and action == "analyze": return _analyze(req, auth)
+        if req.method == "POST" and action == "add-to-books": return _add_to_books(req, auth)
         if req.method == "GET" and action == "export": return _export(req, auth)
         if req.method == "GET" and action == "recent": return _recent(req, auth)
         return _error("Unknown reconciliation route", 404)

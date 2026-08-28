@@ -427,7 +427,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             tds_amount = calculate_tds(amount_before_gst if amount_before_gst > 0 else amount, tds_section)
 
             bill_date = data.get("bill_date") or datetime.now().strftime("%Y-%m-%d")
-            due_date = calculate_msme_due_date(bill_date, False) or (datetime.strptime(bill_date, "%Y-%m-%d") + timedelta(days=30)).strftime("%Y-%m-%d")
+            try:
+                payment_terms_days = int(data.get("payment_terms_days", 30))
+                if payment_terms_days < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return func.HttpResponse(json.dumps({"ok": False, "error": "payment_terms_days must be a non-negative integer"}), mimetype="application/json", status_code=400)
+            due_date = (datetime.strptime(bill_date, "%Y-%m-%d") + timedelta(days=payment_terms_days)).strftime("%Y-%m-%d")
 
             new_bill = {
                 "company_id": company_id,
@@ -435,6 +441,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 "bill_number": data.get("bill_number", f"BILL-{int(datetime.now().timestamp())}"),
                 "bill_date": bill_date,
                 "due_date": due_date,
+                "payment_terms_days": payment_terms_days,
                 "amount": amount,
                 "gst_amount": float(data.get("gst_amount", 0)),
                 "tds_amount": tds_amount,

@@ -19,8 +19,6 @@ import {
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -120,16 +118,6 @@ function FlowChart({ data }) {
   );
 }
 
-function BreakdownChart({ breakdown }) {
-  const chartData = [
-    { name: 'Customers', value: breakdown.inflowCustomers, tone: '#67e8f9' },
-    { name: 'Petty cash', value: breakdown.inflowPetty, tone: '#a78bfa' },
-    { name: 'Vendors', value: breakdown.outflowVendors, tone: '#fb7185' },
-    { name: 'Petty out', value: breakdown.outflowPetty, tone: '#fbbf24' },
-  ];
-  return <div className="h-[205px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData} margin={{ top: 8, right: 0, left: -24, bottom: 0 }}><CartesianGrid vertical={false} stroke="rgba(148,163,184,.1)" /><XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} /><YAxis hide /><Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(255,255,255,.03)' }} /><Bar dataKey="value" name="Amount" radius={[6, 6, 2, 2]} fill="#67e8f9" /></BarChart></ResponsiveContainer></div>;
-}
-
 function DashboardSkeleton() {
   return (
     <div className="dashboard-loading-wrap" aria-busy="true" aria-live="polite">
@@ -210,6 +198,7 @@ export default function CashflowDashboard() {
   const [reportSending, setReportSending] = useState(false);
   const [reportMessage, setReportMessage] = useState('');
   const [scheduledReports, setScheduledReports] = useState(false);
+  const [showNetDetails, setShowNetDetails] = useState(false);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const canSendReport = ['owner', 'admin', 'finance'].includes(String(profile?.role || '').toLowerCase());
   const canManageScheduledReports = ['owner', 'admin'].includes(String(profile?.role || '').toLowerCase());
@@ -395,15 +384,15 @@ export default function CashflowDashboard() {
   const periodBreakdown = useMemo(() => {
     const summary = data?.summary || {};
     const inflowCustomers = Number(summary.inflow_from_customers || 0);
-    const inflowPetty = Number(summary.inflow_from_petty_cash || 0);
     const outflowVendors = Number(summary.outflow_to_vendors || 0);
-    const outflowPetty = Number(summary.outflow_from_petty_cash || 0);
+    const overdueAr = Number(summary.aging_summary?.ar?.overdue || 0);
+    const overdueAp = Number(summary.aging_summary?.ap?.overdue || 0);
     return {
       inflowCustomers,
-      inflowPetty,
       outflowVendors,
-      outflowPetty,
-      max: Math.max(inflowCustomers, inflowPetty, outflowVendors, outflowPetty, 0),
+      overdueAr,
+      overdueAp,
+      max: Math.max(inflowCustomers, outflowVendors, overdueAr, overdueAp, 0),
     };
   }, [data]);
 
@@ -471,20 +460,27 @@ export default function CashflowDashboard() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4 mb-6">
-        <SummaryCard label="Cash Received" value={formatMoney(data?.summary?.cash_received)} icon={ArrowUpRight} tone="emerald" />
-        <SummaryCard label="Cash Payable" value={formatMoney(data?.summary?.cash_payable)} icon={ArrowDownRight} tone="rose" />
-        <SummaryCard label="Customer Money Pending" value={formatMoney(data?.summary?.cash_pending)} icon={AlertTriangle} tone="amber" />
-        <SummaryCard label="Cash Outflow" value={formatMoney(data?.summary?.cash_outflow)} icon={ArrowDownRight} tone="rose" />
-        <SummaryCard label="Net Cash Position" value={formatMoney(data?.summary?.net_cash_position)} icon={Gauge} tone="sky" />
-        <SummaryCard label="Petty Cash Balance" value={formatMoney(data?.summary?.petty_cash_balance)} icon={PiggyBank} tone="emerald" />
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-6 mb-6">
+        <SummaryCard label="Cash Collected" value={formatMoney(data?.summary?.cash_received)} icon={ArrowUpRight} tone="emerald" />
+        <SummaryCard label="Cash Disbursed" value={formatMoney(data?.summary?.cash_outflow)} icon={ArrowDownRight} tone="rose" />
+        <SummaryCard label="Accounts Payable" value={formatMoney(data?.summary?.cash_payable)} icon={ArrowDownRight} tone="rose" />
+        <SummaryCard label="Accounts Receivable" value={formatMoney(data?.summary?.cash_pending)} icon={AlertTriangle} tone="amber" />
         <SummaryCard
-          label="Months You Can Run"
+          label="Cash Runway"
           value={data?.summary?.runway_months == null ? 'N/A' : `${data.summary.runway_months} mo`}
           icon={Wallet}
           tone="indigo"
         />
-        <SummaryCard label="Cash Inflow" value={formatMoney(data?.summary?.cash_inflow)} icon={Banknote} tone="sky" />
+        <div className="relative">
+          <button type="button" className="w-full text-left" onClick={() => setShowNetDetails((value) => !value)} title="Show cash inflow and outflow">
+            <SummaryCard label="Net Cash Flow" value={formatMoney(data?.summary?.net_cash_position)} icon={Gauge} tone="sky" />
+          </button>
+          {showNetDetails && <div className="absolute z-20 left-0 right-0 top-full mt-2 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-xl"><div className="flex justify-between"><span>Total Cash Inflow</span><strong className="text-emerald-700">{formatMoney(data?.summary?.cash_inflow)}</strong></div><div className="mt-2 flex justify-between"><span>Payments Made (Outflow)</span><strong className="text-rose-700">{formatMoney(data?.summary?.cash_outflow)}</strong></div></div>}
+        </div>
+      </div>
+      <div className="grid gap-5 lg:grid-cols-2 mb-6">
+        <div className="card-ui p-6"><h3 className="text-base font-semibold text-primary">P&amp;L Snapshot (Accrual)</h3><div className="mt-4 grid grid-cols-3 gap-3"><div><p className="text-xs text-muted">Revenue</p><strong className="text-emerald-700">{formatMoney(data?.summary?.accrued_revenue)}</strong></div><div><p className="text-xs text-muted">Expenses</p><strong className="text-rose-700">{formatMoney(Number(data?.summary?.accrued_expenses || 0) + Number(data?.summary?.direct_expenses || 0))}</strong></div><div><p className="text-xs text-muted">Net Profit/Loss</p><strong className={Number(data?.summary?.net_profit_loss || 0) >= 0 ? 'text-emerald-700' : 'text-rose-700'}>{formatMoney(data?.summary?.net_profit_loss)}</strong></div></div></div>
+        <div className="card-ui p-6"><h3 className="text-base font-semibold text-primary">Aging Summary</h3><div className="mt-4 grid grid-cols-2 gap-4 text-sm"><div><p className="font-semibold text-primary">Receivables</p><p className="text-danger">Overdue: {formatMoney(data?.summary?.aging_summary?.ar?.overdue)}</p><p className="text-amber-700">Due soon: {formatMoney(data?.summary?.aging_summary?.ar?.due_soon)}</p></div><div><p className="font-semibold text-primary">Payables</p><p className="text-danger">Overdue: {formatMoney(data?.summary?.aging_summary?.ap?.overdue)}</p><p className="text-amber-700">Due soon: {formatMoney(data?.summary?.aging_summary?.ap?.due_soon)}</p></div></div></div>
       </div>
 
       <div className="ai-analyst-card mb-6 rounded-2xl border p-6">
@@ -537,9 +533,9 @@ export default function CashflowDashboard() {
         <div className="card-ui p-5">
           <h3 className="text-base font-semibold text-primary mb-3">This Period Breakdown</h3>
           <SafeBar label="Money Received from Customers" value={periodBreakdown.inflowCustomers} max={periodBreakdown.max} tone="emerald" />
-          <SafeBar label="Cash Added to Petty Cash" value={periodBreakdown.inflowPetty} max={periodBreakdown.max} tone="sky" />
           <SafeBar label="Paid to Vendors" value={periodBreakdown.outflowVendors} max={periodBreakdown.max} tone="rose" />
-          <SafeBar label="Spent from Petty Cash" value={periodBreakdown.outflowPetty} max={periodBreakdown.max} tone="amber" />
+          <SafeBar label="Overdue Customer Receivables" value={periodBreakdown.overdueAr} max={periodBreakdown.max} tone="amber" />
+          <SafeBar label="Overdue Vendor Payables" value={periodBreakdown.overdueAp} max={periodBreakdown.max} tone="rose" />
           <div className="cashflow-ops mt-4 border-t border-slate-200 pt-4"><div className="flex items-center justify-between"><div><p className="dashboard-kicker">Cashflow operations</p><h4 className="mt-1 text-sm font-bold text-primary">Quotation pipeline</h4></div><Link to="/cashflow/receivables" className="text-xs font-bold text-secondary">View all</Link></div><div className="mt-3 grid grid-cols-3 gap-2"><div><strong className="text-base text-primary">12</strong><span>Open quotes</span></div><div><strong className="text-base text-amber-700">₹1.8L</strong><span>Awaiting decision</span></div><div><strong className="text-base text-emerald-700">4</strong><span>Due this week</span></div></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full w-[68%] rounded-full bg-gradient-to-r from-cyan-500 to-sky-400" /></div><p className="mt-1.5 text-[11px] text-slate-500">68% of quoted value has a next action assigned.</p></div>
         </div>
       </div>
@@ -597,8 +593,21 @@ export default function CashflowDashboard() {
         </div>
 
         <div className="dashboard-glass p-6">
-          <div className="mb-4"><p className="dashboard-kicker">Liquidity mix</p><h3 className="mt-1 text-lg font-semibold text-white">Flow breakdown</h3></div>
-          <BreakdownChart breakdown={periodBreakdown} />
+          <div className="mb-4"><p className="dashboard-kicker">CashPulse guide</p><h3 className="mt-1 text-lg font-semibold text-white">Keep your cash position healthy</h3></div>
+          <div className="space-y-3 text-sm">
+            <div className="cashpulse-guide-item flex gap-3 rounded-xl border border-white/15 bg-white/[0.06] p-3">
+              <span className="cashpulse-guide-number mt-0.5 font-semibold">01</span>
+              <p className="cashpulse-guide-copy"><strong>Reconcile regularly.</strong> Upload your latest bank statement to identify missing or unexpected transactions.</p>
+            </div>
+            <div className="cashpulse-guide-item flex gap-3 rounded-xl border border-white/15 bg-white/[0.06] p-3">
+              <span className="cashpulse-guide-number mt-0.5 font-semibold">02</span>
+              <p className="cashpulse-guide-copy"><strong>Review due dates.</strong> Prioritize overdue receivables and upcoming payables before committing cash.</p>
+            </div>
+            <div className="cashpulse-guide-item flex gap-3 rounded-xl border border-white/15 bg-white/[0.06] p-3">
+              <span className="cashpulse-guide-number mt-0.5 font-semibold">03</span>
+              <p className="cashpulse-guide-copy"><strong>Keep books current.</strong> Add bank fees, subscriptions, and other unlinked activity as soon as it appears.</p>
+            </div>
+          </div>
           <h3 className="mt-5 border-t border-white/10 pt-5 text-sm font-semibold text-white">MSME Compliance Alerts</h3>
           <div className="flex flex-col gap-3">
             {(data?.msme_alerts || []).map((alert, idx) => (

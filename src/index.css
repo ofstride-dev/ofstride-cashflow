@@ -63,6 +63,15 @@ body {
   min-height: 100vh;
   background-color: #020617;
 }
+
+/* Keep the comfortable density of the former 85% browser zoom at 100%.
+ * Most application spacing and typography uses rem-based Tailwind utilities,
+ * so scaling the root font size preserves layout behavior without creating a
+ * transformed containing block that could interfere with sticky elements or
+ * dropdown positioning.
+ */
+html { font-size: 85%; }
+
 #root { min-height: 100vh; margin: 0; padding: 0; background-color: #eef9ff; }
 
 .cashflow-loading-screen {
@@ -229,7 +238,7 @@ body {
 .dashboard-sidebar .dashboard-nav-danger svg { color: #fb7185; }
 .dashboard-header { background: rgba(6, 11, 22, .72); }
 .dashboard-brand-mark { display: flex; align-items: baseline; gap: .4rem; white-space: nowrap; }
-.dashboard-sidebar-brand-parent { color: #67e8f9; font-size: .7rem; font-weight: 900; letter-spacing: .24em; }
+.dashboard-sidebar-brand-parent { color: #67e8f9; font-size: .82rem; font-weight: 900; letter-spacing: .2em; }
 .dashboard-sidebar-brand-product { margin-top: .2rem; color: #fff; font-size: 1.35rem; font-weight: 900; letter-spacing: .08em; line-height: 1.1; }
 .dashboard-brand-parent { color: #ffffff; font-size: .88rem; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; text-shadow: 0 1px 8px rgba(103,232,249,.22); }
 .dashboard-brand-product { color: #67e8f9; font-size: .72rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
@@ -242,6 +251,10 @@ body {
 .dashboard-export:hover { background: rgba(34,211,238,.16); }
 .dashboard-avatar { background: linear-gradient(135deg, #67e8f9, #a78bfa); }
 .dashboard-glass { position: relative; overflow: hidden; border: 1px solid rgba(148,163,184,.34); border-radius: 1.25rem; background: linear-gradient(145deg, rgba(255,255,255,.92), rgba(226,232,240,.62)); box-shadow: 0 24px 70px -36px rgba(15,23,42,.28), inset 0 1px 0 rgba(255,255,255,.95); backdrop-filter: blur(18px); }
+.cashpulse-guide-item { color: #24364d !important; }
+.cashpulse-guide-copy { color: #24364d !important; line-height: 1.45; }
+.cashpulse-guide-copy strong { color: #182b45 !important; }
+.cashpulse-guide-number { color: #0e7490 !important; }
 .dashboard-stat-card { position: relative; overflow: hidden; background: linear-gradient(145deg, rgba(255,255,255,.94), rgba(226,232,240,.68)); border-color: rgba(148,163,184,.34); box-shadow: 0 20px 46px -30px rgba(15,23,42,.28), inset 0 1px 0 rgba(255,255,255,.95); transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; backdrop-filter: blur(16px); }
 .dashboard-stat-card::after { content: ''; position: absolute; inset: auto -20% -70%; height: 100%; background: radial-gradient(ellipse, currentColor, transparent 65%); opacity: .07; pointer-events: none; }
 .dashboard-stat-card:hover { transform: translateY(-3px); border-color: rgba(103,232,249,.25); box-shadow: 0 26px 55px -28px rgba(0,0,0,.9), 0 0 32px -20px currentColor; }

@@ -228,7 +228,7 @@ def _build_evidence(client: Any, tenant: Any, start: date, end: date) -> dict[st
         "dashboard": _read_dashboard,
         "transactions": lambda: _read(
             "cashflow_transactions",
-            "id,transaction_date,amount,invoice_id,bill_id,payment_mode,reference_no",
+            "id,transaction_date,amount,invoice_id,bill_id,transaction_type,payment_mode,reference_no,category",
             "transaction_date",
         ),
         "petty_cash": lambda: _read(
@@ -278,8 +278,8 @@ def _build_evidence(client: Any, tenant: Any, start: date, end: date) -> dict[st
     bills = results.get("accounts_payable", [])
     invoices = results.get("accounts_receivable", [])
 
-    inflow = sum(_safe_float(row.get("amount")) for row in transactions if row.get("invoice_id"))
-    outflow = sum(_safe_float(row.get("amount")) for row in transactions if row.get("bill_id"))
+    inflow = sum(_safe_float(row.get("amount")) for row in transactions if str(row.get("transaction_type") or ("INFLOW" if row.get("invoice_id") else "OUTFLOW")).upper() == "INFLOW")
+    outflow = sum(_safe_float(row.get("amount")) for row in transactions if str(row.get("transaction_type") or ("INFLOW" if row.get("invoice_id") else "OUTFLOW")).upper() == "OUTFLOW")
     petty_in = sum(_safe_float(row.get("cash_in")) for row in petty_cash)
     petty_out = sum(_safe_float(row.get("cash_out")) for row in petty_cash)
     pending_invoices = [row for row in invoices if str(row.get("status") or "").lower() in {"pending", "approved"}]
@@ -319,8 +319,8 @@ def _build_evidence(client: Any, tenant: Any, start: date, end: date) -> dict[st
 def _report_metrics(evidence: dict[str, Any]) -> dict[str, Any]:
     transactions = evidence.get("transactions", [])
     petty = evidence.get("petty_cash", [])
-    inflows = [row for row in transactions if row.get("invoice_id")]
-    outflows = [row for row in transactions if row.get("bill_id")]
+    inflows = [row for row in transactions if str(row.get("transaction_type") or ("INFLOW" if row.get("invoice_id") else "OUTFLOW")).upper() == "INFLOW"]
+    outflows = [row for row in transactions if str(row.get("transaction_type") or ("INFLOW" if row.get("invoice_id") else "OUTFLOW")).upper() == "OUTFLOW"]
     inflow = sum(_safe_float(row.get("amount")) for row in inflows)
     outflow = sum(_safe_float(row.get("amount")) for row in outflows)
     petty_total = sum(_safe_float(row.get("cash_in")) + _safe_float(row.get("cash_out")) for row in petty)

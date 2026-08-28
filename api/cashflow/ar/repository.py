@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from shared.tenant import TenantContext
 
 
@@ -18,17 +19,42 @@ class ARRepository:
 
     def list_invoices(self, context: TenantContext):
         try:
-            return (
+            response = (
                 self._client.table("cashflow_invoices")
                 .select("*, cashflow_entities!cashflow_invoices_customer_id_fkey(id, name, gstin)")
                 .eq("company_id", context.company_id)
                 .order("created_at", desc=True)
                 .execute()
             )
+            invoice_ids = [row.get("id") for row in (response.data or []) if row.get("id")]
+            payments = self._client.table("cashflow_transactions").select("invoice_id,amount").eq("company_id", context.company_id).in_("invoice_id", invoice_ids).execute() if invoice_ids else None
+            paid = {}
+            for row in (payments.data if payments else []) or []:
+                paid[row.get("invoice_id")] = paid.get(row.get("invoice_id"), 0) + float(row.get("amount") or 0)
+            for row in response.data or []:
+                gross = float(row.get("amount") or 0) + float(row.get("gst_amount") or 0)
+                row["balance_due"] = round(max(gross - paid.get(row.get("id"), 0), 0), 2)
+                row.update(self._aging(row.get("due_date"), row["balance_due"], row.get("status")))
+            return response
         except Exception as exc:
             if is_missing_table_error(exc):
                 raise MissingTableError(str(exc)) from exc
             raise
+
+    @staticmethod
+    def _aging(due_date, balance_due, status):
+        if str(status or "").lower() == "paid" or balance_due <= 0:
+            return {"aging_category": "Paid", "aging_label": "Paid", "days_overdue": 0}
+        try:
+            due = datetime.strptime(str(due_date)[:10], "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            return {"aging_category": "Not Due", "aging_label": "Due date unavailable", "days_overdue": 0}
+        days = (due - date.today()).days
+        if days < 0:
+            return {"aging_category": "Overdue", "aging_label": f"Overdue by {abs(days)} days", "days_overdue": abs(days)}
+        if days <= 7:
+            return {"aging_category": "Due Soon", "aging_label": f"Due in {days} days", "days_overdue": 0}
+        return {"aging_category": "Not Due", "aging_label": "Not due", "days_overdue": 0}
 
     def get_or_create_customer(self, context: TenantContext, customer_name, gstin=None) -> str:
         customer_name = (customer_name or "").strip() or "Walk-in Customer"

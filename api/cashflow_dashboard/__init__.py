@@ -106,6 +106,11 @@ def _empty_dashboard(start_date, end_date, applied_period) -> dict:
             "inflow_from_petty_cash": 0,
             "outflow_to_vendors": 0,
             "outflow_from_petty_cash": 0,
+            "accrued_revenue": 0,
+            "accrued_expenses": 0,
+            "direct_expenses": 0,
+            "net_profit_loss": 0,
+            "aging_summary": {"ar": {"overdue": 0, "due_soon": 0, "not_due": 0}, "ap": {"overdue": 0, "due_soon": 0, "not_due": 0}},
         },
         "msme_alerts": [],
         "trend": {"monthly": []},
@@ -147,9 +152,12 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 return create_response(200, True, data=_empty_dashboard(start_date, end_date, applied_period))
             raise
         tx_rows = window["transactions"]
+        all_tx_rows = window["all_transactions"]
         petty_rows = window["petty_cash"]
         pending_ar_rows = window["pending_invoices"]
         payable_rows = window["payable_bills"]
+        accrued_invoice_rows = window["accrued_invoices"]
+        accrued_bill_rows = window["accrued_bills"]
         msme_candidates = window["msme_candidates"]
 
         # Last 6 months trend for dashboard charts.
@@ -168,8 +176,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         trend_petty_rows = trend["petty_cash"]
 
         tx_data = tx_rows.data or []
-        cash_received = round(sum(_safe_float(r.get("amount")) for r in tx_data if r.get("invoice_id")), 2)
-        ap_paid = round(sum(_safe_float(r.get("amount")) for r in tx_data if r.get("bill_id")), 2)
+        cash_received = round(sum(_safe_float(r.get("amount")) for r in tx_data if str(r.get("transaction_type") or "").upper() == "INFLOW"), 2)
+        ap_paid = round(sum(_safe_float(r.get("amount")) for r in tx_data if str(r.get("transaction_type") or "").upper() == "OUTFLOW"), 2)
 
         petty_cash_in = round(sum(_safe_float(r.get("cash_in")) for r in (petty_rows.data or [])), 2)
         petty_cash_out = round(sum(_safe_float(r.get("cash_out")) for r in (petty_rows.data or [])), 2)
@@ -178,12 +186,36 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         cash_outflow = round(ap_paid + petty_cash_out, 2)
         net_cash_position = round(cash_inflow - cash_outflow, 2)
 
-        cash_pending = _sum_amount(pending_ar_rows.data or [], include_gst=True)
-        cash_payable = _sum_amount(payable_rows.data or [], include_gst=True)
+        invoice_paid = {}
+        for row in (all_tx_rows.data or []):
+            if row.get("invoice_id"):
+                invoice_paid[row["invoice_id"]] = invoice_paid.get(row["invoice_id"], 0) + _safe_float(row.get("amount"))
+        bill_paid = {}
+        for row in (all_tx_rows.data or []):
+            if row.get("bill_id"):
+                bill_paid[row["bill_id"]] = bill_paid.get(row["bill_id"], 0) + _safe_float(row.get("amount"))
+        cash_pending = round(sum(max(_safe_float(r.get("amount")) + _safe_float(r.get("gst_amount")) - invoice_paid.get(r.get("id"), 0), 0) for r in (pending_ar_rows.data or [])), 2)
+        # AP stores amount as the gross bill value; do not add GST a second time.
+        cash_payable = round(sum(max(_safe_float(r.get("amount")) - bill_paid.get(r.get("id"), 0), 0) for r in (payable_rows.data or [])), 2)
+        accrued_revenue = _sum_amount(accrued_invoice_rows.data, include_gst=True)
+        # AP stores amount as the gross bill value, unlike AR's net amount.
+        accrued_expenses = _sum_amount(accrued_bill_rows.data)
+        direct_expenses = round(sum(_safe_float(r.get("amount")) for r in tx_data if not r.get("invoice_id") and not r.get("bill_id") and str(r.get("transaction_type") or "").upper() == "OUTFLOW"), 2)
+        aging_summary = {"ar": {"overdue": 0.0, "due_soon": 0.0, "not_due": 0.0}, "ap": {"overdue": 0.0, "due_soon": 0.0, "not_due": 0.0}}
+        for row in pending_ar_rows.data or []:
+            gross = _safe_float(row.get("amount")) + _safe_float(row.get("gst_amount")); balance = max(gross - invoice_paid.get(row.get("id"), 0), 0)
+            due = _to_date(row.get("due_date")); key = "overdue" if due and due < date.today() else "due_soon" if due and (due - date.today()).days <= 7 else "not_due"
+            aging_summary["ar"][key] += balance
+        for row in payable_rows.data or []:
+            balance = max(_safe_float(row.get("amount")) - bill_paid.get(row.get("id"), 0), 0); due = _to_date(row.get("due_date")); key = "overdue" if due and due < date.today() else "due_soon" if due and (due - date.today()).days <= 7 else "not_due"
+            aging_summary["ap"][key] += balance
+        for section in aging_summary.values():
+            for key in section: section[key] = round(section[key], 2)
         petty_cash_balance = round(petty_cash_in - petty_cash_out, 2)
 
         avg_daily_outflow = (cash_outflow / days_in_window) if days_in_window else 0.0
-        runway_months = round((cash_pending / (avg_daily_outflow * 30.0)), 2) if avg_daily_outflow > 0 else None
+        book_balance = round(sum(_safe_float(r.get("amount")) for r in (all_tx_rows.data or []) if str(r.get("transaction_type") or "").upper() == "INFLOW") - sum(_safe_float(r.get("amount")) for r in (all_tx_rows.data or []) if str(r.get("transaction_type") or "").upper() == "OUTFLOW"), 2)
+        runway_months = round((book_balance / (avg_daily_outflow * 30.0)), 2) if avg_daily_outflow > 0 else None
 
         alerts = []
         for row in msme_candidates.data or []:
@@ -225,9 +257,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             if key not in series_by_month:
                 continue
             amt = _safe_float(row.get("amount"))
-            if row.get("invoice_id"):
+            if str(row.get("transaction_type") or "").upper() == "INFLOW":
                 series_by_month[key]["inflow"] += amt
-            if row.get("bill_id"):
+            if str(row.get("transaction_type") or "").upper() == "OUTFLOW":
                 series_by_month[key]["outflow"] += amt
 
         for row in (trend_petty_rows.data or []):
@@ -264,10 +296,16 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 "net_cash_position": net_cash_position,
                 "petty_cash_balance": petty_cash_balance,
                 "runway_months": runway_months,
+                "book_balance": book_balance,
                 "inflow_from_customers": cash_received,
                 "inflow_from_petty_cash": petty_cash_in,
                 "outflow_to_vendors": ap_paid,
                 "outflow_from_petty_cash": petty_cash_out,
+                "accrued_revenue": accrued_revenue,
+                "accrued_expenses": accrued_expenses,
+                "direct_expenses": direct_expenses,
+                "net_profit_loss": round(accrued_revenue - accrued_expenses - direct_expenses, 2),
+                "aging_summary": aging_summary,
             },
             "msme_alerts": alerts[:5],
             "trend": {
