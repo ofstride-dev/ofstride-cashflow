@@ -323,7 +323,7 @@ export default function AccountsReceivable() {
 
       <div className="card-ui mb-10 p-6 sm:p-8">
         <h3 className="mb-6 text-lg font-semibold text-primary">Create New Invoice</h3>
-        <form onSubmit={handleCreateInvoice} className="grid items-end gap-6" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+        <form onSubmit={handleCreateInvoice} className="grid items-start gap-6" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
           <div>
             <label className="label-ui" htmlFor="ar-customer_name">Customer Name</label>
             <input id="ar-customer_name" type="text" name="customer_name" value={formData.customer_name} onChange={handleInputChange} required className="input-ui" />
