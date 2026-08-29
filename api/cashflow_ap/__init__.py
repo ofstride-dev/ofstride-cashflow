@@ -422,6 +422,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
             amount = float(data.get("total_amount", data.get("amount", 0)))
             amount_before_gst = float(data.get("amount_before_gst", max(amount - float(data.get("gst_amount", 0)), 0)))
+            gst_rate = max(0.0, min(100.0, float(data.get("gst_rate", 0) or 0)))
+            gst_amount = round(amount_before_gst * gst_rate / 100, 2) if data.get("gst_rate") not in (None, "") else float(data.get("gst_amount", 0))
+            amount = round(amount_before_gst + gst_amount, 2)
             tds_section = data.get("tds_section", "NONE")
             # TDS should apply on taxable value (before GST) where possible.
             tds_amount = calculate_tds(amount_before_gst if amount_before_gst > 0 else amount, tds_section)
@@ -443,7 +446,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 "due_date": due_date,
                 "payment_terms_days": payment_terms_days,
                 "amount": amount,
-                "gst_amount": float(data.get("gst_amount", 0)),
+                "gst_amount": gst_amount,
                 "tds_amount": tds_amount,
                 "created_by": identity.get("user_id"),
                 "status": "pending"

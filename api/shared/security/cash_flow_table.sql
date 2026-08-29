@@ -5,6 +5,17 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- Permanent seller details used by GST invoice exports.
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS legal_name TEXT;
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS billing_address TEXT;
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS gstin TEXT;
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS pan TEXT;
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS default_hsn_sac TEXT;
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS bank_name TEXT;
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS bank_account_number TEXT;
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS bank_ifsc TEXT;
+
 -- 1. ENUMS
 DO $$
 BEGIN
@@ -82,6 +93,12 @@ ALTER TABLE public.cashflow_invoices
 
 ALTER TABLE public.cashflow_invoices
     ADD COLUMN IF NOT EXISTS notes TEXT;
+
+ALTER TABLE public.cashflow_invoices
+    ADD COLUMN IF NOT EXISTS discount_percent NUMERIC(5, 2) DEFAULT 0.00;
+
+ALTER TABLE public.cashflow_invoices
+    ADD COLUMN IF NOT EXISTS invoice_raised_by TEXT;
 
 -- 5. PAYMENTS & COLLECTIONS
 CREATE TABLE IF NOT EXISTS public.cashflow_transactions (

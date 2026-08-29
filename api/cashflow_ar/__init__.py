@@ -151,7 +151,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             item_services = _normalize_item_services(data.get("item_services"))
 
             amount = _to_float(data.get("amount"), 0.0)
-            gst_amount = _to_float(data.get("gst_amount"), 0.0)
+            discount_percent = max(0.0, min(100.0, _to_float(data.get("discount_percent"), 0.0)))
+            taxable_amount = round(amount * (1 - discount_percent / 100), 2)
+            gst_rate = max(0.0, min(100.0, _to_float(data.get("gst_rate"), 0.0)))
+            gst_amount = round(taxable_amount * gst_rate / 100, 2) if "gst_rate" in data else _to_float(data.get("gst_amount"), 0.0)
 
             invoice_date = data.get("invoice_date") or datetime.now().strftime("%Y-%m-%d")
             # Default due date to 15 days if not specified
@@ -163,11 +166,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 "invoice_number": data.get("invoice_number") or f"INV-{int(datetime.now().timestamp())}",
                 "invoice_date": invoice_date,
                 "due_date": due_date,
-                "amount": amount,
+                "amount": taxable_amount,
                 "gst_amount": gst_amount,
                 "status": data.get("status", "pending"),
                 "irn_number": data.get("irn_number", None),
-                "is_proforma": data.get("is_proforma", False),
+                "is_proforma": False,
+                "discount_percent": discount_percent,
+                "invoice_raised_by": data.get("invoice_raised_by") or None,
                 "created_by": identity.get("user_id"),
                 "notes": _compose_notes(data.get("notes", ""), item_services),
                 "item_services": item_services,

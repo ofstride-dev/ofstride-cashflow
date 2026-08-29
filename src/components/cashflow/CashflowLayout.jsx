@@ -16,6 +16,7 @@ import {
 import { cashflowFetch } from '../../services/cashflowApi';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
 import CashflowLoadingScreen from './CashflowLoadingScreen';
+import { supabase } from '../../services/supabase';
 
 const NAV_ITEMS = [
   { label: 'Dashboard', path: '/cashflow/dashboard', icon: LayoutDashboard },
@@ -72,6 +73,10 @@ function CashflowShell() {
   const [endDate, setEndDate] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
   const [exportError, setExportError] = useState('');
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
+  const [companyForm, setCompanyForm] = useState({ legal_name: '', billing_address: '', phone: '', gstin: '', pan: '', default_hsn_sac: '', bank_name: '', bank_account_number: '', bank_ifsc: '' });
+  const [companySaving, setCompanySaving] = useState(false);
+  const [companyMessage, setCompanyMessage] = useState('');
 
   const today = useMemo(() => {
     const dt = new Date();
@@ -89,6 +94,23 @@ function CashflowShell() {
     setEndDate((prev) => prev || today);
     setExportError('');
     setIsExportOpen(true);
+  };
+
+  const openCompanyModal = async () => {
+    setCompanyMessage('');
+    setIsCompanyModalOpen(true);
+    if (!profile?.company_id) return;
+    const { data } = await supabase.from('companies').select('legal_name,billing_address,phone,gstin,pan,default_hsn_sac,bank_name,bank_account_number,bank_ifsc').eq('id', profile.company_id).maybeSingle();
+    if (data) setCompanyForm((previous) => ({ ...previous, ...data }));
+  };
+
+  const saveCompanyDetails = async (event) => {
+    event.preventDefault();
+    if (!profile?.company_id || !isAdmin) return;
+    setCompanySaving(true); setCompanyMessage('');
+    const { error } = await supabase.from('companies').update(companyForm).eq('id', profile.company_id);
+    setCompanySaving(false);
+    setCompanyMessage(error ? error.message : 'Company billing details saved.');
   };
 
   const closeExportModal = () => {
@@ -183,11 +205,11 @@ function CashflowShell() {
     <div className="dashboard-app min-h-screen lg:flex">
       {/* Desktop sidebar */}
       <aside className="dashboard-sidebar hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 lg:sticky lg:top-0 lg:h-screen">
-          <div className="px-5 py-6 border-b border-white/10">
-          <p className="dashboard-sidebar-brand-parent">Ofstride Services</p>
-          <h1 className="dashboard-sidebar-brand-product">CashPulse</h1>
-          <p className="mt-5 text-[0.75rem] font-bold uppercase tracking-[0.16em] text-slate-500">Workspace</p>
-        </div>
+          <Link to="/cashflow/dashboard" className="block px-5 py-6 border-b border-white/10 transition-opacity hover:opacity-85" aria-label="Go to CashPulse dashboard">
+            <p className="dashboard-sidebar-brand-parent">Ofstride Services</p>
+            <h1 className="dashboard-sidebar-brand-product">CashPulse</h1>
+            <p className="mt-5 text-[0.75rem] font-bold uppercase tracking-[0.16em] text-slate-500">Workspace</p>
+          </Link>
         <div className="flex-1 overflow-y-auto px-3 py-4">
           <NavLinks isActivePath={isActivePath} />
         </div>
@@ -223,10 +245,10 @@ function CashflowShell() {
           />
           <div className="dashboard-sidebar relative z-10 flex h-full w-72 max-w-[85vw] flex-col shadow-2xl">
             <div className="flex items-center justify-between px-5 py-5 border-b border-white/10">
-              <div>
+              <Link to="/cashflow/dashboard" onClick={() => setIsMobileNavOpen(false)} aria-label="Go to CashPulse dashboard">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">OfStride</p>
                 <h1 className="text-lg font-bold text-white mt-1">CashPulse</h1>
-              </div>
+              </Link>
               <button
                 type="button"
                 onClick={() => setIsMobileNavOpen(false)}
@@ -302,7 +324,7 @@ function CashflowShell() {
                 {initialsFor(profile?.full_name || userLabel)}
               </span>
               <div className="text-left leading-tight">
-                <p className="text-sm font-medium text-white truncate max-w-[160px]">{displayName}</p>
+                <button type="button" onClick={openCompanyModal} className="text-sm font-medium text-white truncate max-w-[160px] hover:text-cyan-200" title="Company billing details">{displayName}</button>
                 <p className="text-xs text-slate-500 truncate max-w-[160px]">{profile?.role || 'employee'}</p>
               </div>
             </div>
@@ -375,6 +397,20 @@ function CashflowShell() {
                 {isDownloading ? 'Preparing…' : 'Download'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {isCompanyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-[1px]">
+          <div className="card-ui w-full max-w-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h3 className="text-lg font-semibold text-primary">Company Billing Details</h3><p className="text-xs text-muted">Saved once and used on outgoing GST invoices.</p></div><button type="button" onClick={() => setIsCompanyModalOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /></button></div>
+            <form onSubmit={saveCompanyDetails} className="grid max-h-[75vh] grid-cols-1 gap-4 overflow-y-auto p-5 sm:grid-cols-2">
+              {[['legal_name','Legal / Company Name'],['billing_address','Registered Address'],['phone','Phone'],['gstin','GSTIN'],['pan','PAN'],['default_hsn_sac','Default HSN/SAC'],['bank_name','Bank Name'],['bank_account_number','Account Number'],['bank_ifsc','IFSC Code']].map(([name,label]) => <div key={name} className={name === 'billing_address' ? 'sm:col-span-2' : ''}><label className="label-ui" htmlFor={`company-${name}`}>{label}</label>{name === 'billing_address' ? <textarea id={`company-${name}`} name={name} value={companyForm[name]} onChange={(e) => setCompanyForm({ ...companyForm, [name]: e.target.value })} className="input-ui min-h-20" /> : <input id={`company-${name}`} name={name} value={companyForm[name]} onChange={(e) => setCompanyForm({ ...companyForm, [name]: e.target.value })} className="input-ui" />}</div>)}
+              {!isAdmin && <p className="text-xs text-muted sm:col-span-2">Only an administrator can change company billing details.</p>}
+              {companyMessage && <p className="text-sm text-secondary sm:col-span-2">{companyMessage}</p>}
+              {isAdmin && <button type="submit" disabled={companySaving} className="btn-ui btn-ui-primary sm:col-span-2">{companySaving ? 'Saving…' : 'Save Company Details'}</button>}
+            </form>
           </div>
         </div>
       )}

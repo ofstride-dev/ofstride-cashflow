@@ -48,6 +48,7 @@ export default function AccountsPayable() {
     payment_terms_days: '30',
     amount_before_gst: '',
     gst_amount: '',
+    gst_rate: '',
     total_amount: '',
     tds_section: 'NONE'
   });
@@ -184,7 +185,11 @@ export default function AccountsPayable() {
       const gst = Number(next.gst_amount || 0);
       const total = Number(next.total_amount || 0);
 
-      if (name === 'amount_before_gst' || name === 'gst_amount') {
+      if (name === 'amount_before_gst' || name === 'gst_rate') {
+        const rate = Number(next.gst_rate || 0);
+        next.gst_amount = base > 0 ? (base * rate / 100).toFixed(2) : '';
+        next.total_amount = String(Math.max(base + Number(next.gst_amount || 0), 0));
+      } else if (name === 'gst_amount') {
         next.total_amount = String(Math.max(base + gst, 0));
       } else if (name === 'total_amount' && next.gst_amount !== '') {
         next.amount_before_gst = String(Math.max(total - gst, 0));
@@ -248,7 +253,7 @@ export default function AccountsPayable() {
       if (activeIdentityKeyRef.current !== requestIdentityKey) return;
       if(parsed.ok){
         setInvoices((previousInvoices) => [parsed.data, ...previousInvoices]);
-        setFormData({vendor_name:'',bill_number:'',bill_date:'',payment_terms_days:'30',amount_before_gst:'',gst_amount:'',total_amount:'',tds_section:'NONE'});
+        setFormData({vendor_name:'',bill_number:'',bill_date:'',payment_terms_days:'30',amount_before_gst:'',gst_amount:'',gst_rate:'',total_amount:'',tds_section:'NONE'});
       } else {
         const msg = String(parsed.error || 'Unable to save bill.');
         console.error('AP save failed:', msg);
@@ -268,7 +273,6 @@ export default function AccountsPayable() {
       const netBeforeGst = Number(inv.amount_before_gst || Math.max(storedAmount - gst, 0));
       const gross = netBeforeGst + gst;
       const tds = Number(inv.tds_amount || 0);
-      const netPayable = gross - tds;
       const vendor = inv.cashflow_entities?.name || 'N/A';
 
       return {
@@ -373,6 +377,11 @@ export default function AccountsPayable() {
               </div>
             ))}
             <div>
+              <label className="label-ui" htmlFor="ap-gst_rate">GST Rate (%)</label>
+              <input id="ap-gst_rate" type="number" name="gst_rate" min="0" max="100" step="0.01" value={formData.gst_rate} onChange={handleInputChange} placeholder="Optional" className="input-ui h-12" />
+              <p className="mt-1 text-xs text-muted">GST is calculated on the amount before GST.</p>
+            </div>
+            <div>
               <label className="label-ui" htmlFor="ap-tds_section">TDS Rule</label>
               <select id="ap-tds_section" name="tds_section" value={formData.tds_section} onChange={handleInputChange} className="input-ui h-12 bg-white">
                 <option value="NONE">No TDS</option>
@@ -398,7 +407,7 @@ export default function AccountsPayable() {
           <table className="table-ui text-sm">
             <thead>
               <tr>
-                {['Vendor', 'Bill #', 'Dates', 'Gross', 'Balance Due', 'Status', 'Actions'].map((h) => (
+                {['Vendor / Bill #', 'Bill Date', 'Due Date', 'Gross', 'Balance Due', 'Status', 'Actions'].map((h) => (
                   <th key={h}>{h}</th>
                 ))}
               </tr>
@@ -414,9 +423,9 @@ export default function AccountsPayable() {
                 const approving = approvingId === inv.id;
                 return (
                   <tr key={inv.id}>
-                    <td className="font-semibold text-primary">{vendor}</td>
-                    <td>{inv.bill_number}</td>
-                    <td className="leading-tight"><span className="block text-xs text-muted">Bill: {inv.bill_date}</span><strong className="mt-1 block text-xs text-primary">Due: {inv.due_date || '—'}</strong></td>
+                    <td className="leading-tight"><span className="block font-semibold text-primary">{vendor}</span><span className="mt-1 block text-xs text-muted">Bill #: {inv.bill_number || '—'}</span></td>
+                    <td className="text-xs text-muted">{inv.bill_date || '—'}</td>
+                    <td className="text-xs font-semibold text-primary">{inv.due_date || '—'}</td>
                     <td className="font-semibold text-primary tabular-nums"><details><summary className="cursor-pointer">₹{gross.toLocaleString('en-IN')}</summary><span className="block text-xs text-muted">Net ₹{netBeforeGst.toLocaleString('en-IN')} · GST ₹{gst.toLocaleString('en-IN')} · TDS ₹{(+inv.tds_amount || 0).toLocaleString('en-IN')}</span></details></td>
                     <td className="font-bold text-amber-700 tabular-nums">₹{Number(inv.balance_due ?? gross).toLocaleString('en-IN')}</td>
                     <td>

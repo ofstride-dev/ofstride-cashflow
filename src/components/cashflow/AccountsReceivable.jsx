@@ -8,6 +8,7 @@ import { Download, Plus, Trash2 } from 'lucide-react';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
+import { supabase } from '../../services/supabase';
 
 const GST_SERVICE_RATES = [
   { value: '0', label: 'GST-exempt service (0%)' },
@@ -28,20 +29,29 @@ function TableSkeleton() {
   );
 }
 
+function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character])); }
+function amountInWords(value) { return value ? `Rupees ${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 })} only` : ''; }
+
 export default function AccountsReceivable() {
   const { isAdmin, session, profile } = useCashflowAuth();
   const authIdentityKey = `${session?.user?.id || ''}:${profile?.company_id || ''}`;
   const activeIdentityKeyRef = useRef(authIdentityKey);
   const [invoices, setInvoices] = useState([]);
+  const [companyDetails, setCompanyDetails] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [approvingId, setApprovingId] = useState('');
   
   const [formData, setFormData] = useState({
-    customer_name: '', customer_gstin: '', invoice_number: '', 
+    customer_name: '', customer_gstin: '', invoice_number: '', invoice_raised_by: '', discount_percent: '',
     invoice_date: new Date().toISOString().split('T')[0], 
-    due_date: '', amount: '', gst_amount: '', gst_mode: 'percentage', gst_rate: '18', irn_number: '', is_proforma: false, notes: '', item_services: ['']
+    due_date: '', amount: '', gst_amount: '', gst_mode: 'percentage', gst_rate: '18', irn_number: '', notes: '', item_services: ['']
   });
+
+  useEffect(() => {
+    if (!profile?.company_id) return;
+    supabase.from('companies').select('name,legal_name,billing_address,phone,gstin,pan,default_hsn_sac,bank_name,bank_account_number,bank_ifsc').eq('id', profile.company_id).maybeSingle().then(({ data }) => { if (data) setCompanyDetails(data); });
+  }, [profile?.company_id]);
 
   const normalizeItemServices = (value) => {
     if (Array.isArray(value)) return value.map((v) => String(v || '').trim()).filter(Boolean);
@@ -72,7 +82,11 @@ export default function AccountsReceivable() {
     const gst = Number(invoice?.gst_amount || 0);
     const total = subtotal + gst;
     const items = getInvoiceItems(invoice);
-    const customer = invoice?.cashflow_entities?.name || 'N/A';
+    const customer = invoice?.cashflow_entities?.name || '';
+    const seller = companyDetails;
+    const sellerName = seller.legal_name || seller.name || profile?.company_name || '';
+    const tax = gst;
+    const cgst = ''; const sgst = ''; const igst = '';
 
     const html = `<!doctype html>
 <html>
@@ -80,39 +94,20 @@ export default function AccountsReceivable() {
     <meta charset="utf-8" />
     <title>Invoice ${invoice?.invoice_number || ''}</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 24px; color: #0f172a; }
-      h1 { margin: 0 0 8px 0; }
-      .muted { color: #64748b; font-size: 12px; }
-      table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-      th, td { border: 1px solid #e2e8f0; padding: 8px; text-align: left; }
-      th { background: #f8fafc; }
+      * { box-sizing: border-box; } body { font-family: Arial, sans-serif; margin: 0; padding: 28px; color: #172033; font-size: 12px; } .invoice { max-width: 900px; margin: auto; border: 1px solid #cbd5e1; } .header { display: flex; justify-content: space-between; gap: 24px; padding: 22px; border-bottom: 2px solid #172033; } h1 { margin: 0 0 8px; font-size: 24px; letter-spacing: .08em; } h2 { margin: 0 0 8px; font-size: 17px; } .muted { color: #64748b; line-height: 1.5; } .meta { min-width: 245px; } .meta div, .summary-row { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; } .section { padding: 16px 22px; border-bottom: 1px solid #cbd5e1; } .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; } table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #cbd5e1; padding: 9px 8px; vertical-align: top; } th { background: #eef2f7; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; } .right { text-align: right; } .totals { margin-left: auto; width: 360px; } .grand { font-size: 15px; font-weight: bold; background: #eef2f7; } .footer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; } .sign { min-height: 75px; text-align: center; padding-top: 35px; } @media print { body { padding: 0; } .invoice { border: 0; } }
     </style>
   </head>
-  <body>
-    <h1>Invoice ${invoice?.invoice_number || ''}</h1>
-    <div class="muted">Date: ${invoice?.invoice_date || ''}</div>
-    <div class="muted">Customer: ${customer}</div>
-    <div class="muted">Customer GSTIN: ${invoice?.cashflow_entities?.gstin || ''}</div>
-
-    <table>
+  <body><div class="invoice">
+    <div class="header"><div><h2>${escapeHtml(sellerName)}</h2><div class="muted">${escapeHtml(seller.billing_address)}</div><div>${escapeHtml(seller.phone)}</div><div>GSTIN: ${escapeHtml(seller.gstin)}</div><div>PAN: ${escapeHtml(seller.pan)}</div></div><div class="meta"><h1>TAX INVOICE</h1><div><b>Invoice No.</b><span>${escapeHtml(invoice?.invoice_number)}</span></div><div><b>Invoice Date</b><span>${escapeHtml(invoice?.invoice_date)}</span></div><div><b>Due Date</b><span>${escapeHtml(invoice?.due_date)}</span></div><div><b>IRN</b><span>${escapeHtml(invoice?.irn_number)}</span></div></div></div>
+    <div class="section parties"><div><b>Bill To</b><h2>${escapeHtml(customer)}</h2><div>Address: ${escapeHtml(invoice?.customer_address)}</div><div>GSTIN: ${escapeHtml(invoice?.cashflow_entities?.gstin)}</div></div><div><b>Place of Supply</b><div>State: ${escapeHtml(invoice?.place_of_supply_state)}</div><div>State Code: ${escapeHtml(invoice?.place_of_supply_code)}</div></div></div>
+    <div class="section"><table>
       <thead>
-        <tr>
-          <th>Item / Service</th>
-        </tr>
+        <tr><th>#</th><th>Description</th><th>HSN/SAC Code</th><th>Quantity</th><th>Unit Rate</th><th class="right">Total Amount</th></tr>
       </thead>
       <tbody>
-        ${(items.length ? items : ['General Service']).map((item) => `<tr><td>${item}</td></tr>`).join('')}
+        ${(items.length ? items : ['']).map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item)}</td><td>${escapeHtml(invoice?.hsn_sac_code || seller.default_hsn_sac)}</td><td>${escapeHtml(invoice?.quantity)}</td><td class="right">${escapeHtml(invoice?.unit_rate)}</td><td class="right">${index === 0 ? `₹${subtotal.toFixed(2)}` : ''}</td></tr>`).join('')}
       </tbody>
-    </table>
-
-    <table>
-      <tbody>
-        <tr><th>Subtotal (Before GST)</th><td>₹${subtotal.toFixed(2)}</td></tr>
-        <tr><th>GST</th><td>₹${gst.toFixed(2)}</td></tr>
-        <tr><th>Total</th><td><strong>₹${total.toFixed(2)}</strong></td></tr>
-      </tbody>
-    </table>
-  </body>
+    </table></div><div class="section"><div class="totals"><div class="summary-row"><span>Subtotal (Taxable Amount)</span><b>₹${subtotal.toFixed(2)}</b></div><div class="summary-row"><span>CGST</span><span>${cgst ? `₹${cgst}` : ''}</span></div><div class="summary-row"><span>SGST</span><span>${sgst ? `₹${sgst}` : ''}</span></div><div class="summary-row"><span>IGST</span><span>${igst ? `₹${igst}` : ''}</span></div><div class="summary-row"><span>GST Total</span><b>₹${tax.toFixed(2)}</b></div><div class="summary-row grand"><span>Grand Total</span><span>₹${total.toFixed(2)}</span></div></div></div><div class="section footer-grid"><div><b>Total Amount in Words</b><p>${escapeHtml(amountInWords(total))}</p><b>Bank Account Details</b><p class="muted">Bank: ${escapeHtml(seller.bank_name)}<br>Account Number: ${escapeHtml(seller.bank_account_number)}<br>IFSC Code: ${escapeHtml(seller.bank_ifsc)}</p></div><div><b>For ${escapeHtml(sellerName)}</b><div class="sign">Authorized Signatory</div></div></div></div></body>
 </html>`;
 
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
@@ -156,9 +151,11 @@ export default function AccountsReceivable() {
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
     const next = { ...formData, [name]: type === 'checkbox' ? checked : value };
-    if (name === 'amount' || name === 'gst_rate' || name === 'gst_mode') {
+    if (name === 'amount' || name === 'discount_percent' || name === 'gst_rate' || name === 'gst_mode') {
       const rate = name === 'gst_rate' ? Number(value) : Number(next.gst_rate || 0);
-      const net = Number(name === 'amount' ? value : next.amount) || 0;
+      const grossAmount = Number(name === 'amount' ? value : next.amount) || 0;
+      const discount = Number(name === 'discount_percent' ? value : next.discount_percent) || 0;
+      const net = grossAmount * Math.max(0, 1 - Math.min(100, discount) / 100);
       if ((name === 'gst_mode' ? value : next.gst_mode) === 'percentage') {
         next.gst_amount = net > 0 ? (net * rate / 100).toFixed(2) : '';
       } else if (name === 'gst_mode') {
@@ -186,9 +183,9 @@ export default function AccountsReceivable() {
       if (parsed.ok) {
         setInvoices((previousInvoices) => [parsed.data, ...previousInvoices]);
         setFormData({ 
-          customer_name: '', customer_gstin: '', invoice_number: '', 
+            customer_name: '', customer_gstin: '', invoice_number: '', invoice_raised_by: '', discount_percent: '',
           invoice_date: new Date().toISOString().split('T')[0], 
-           due_date: '', amount: '', gst_amount: '', gst_mode: 'percentage', gst_rate: '18', irn_number: '', is_proforma: false, notes: '', item_services: ['']
+            due_date: '', amount: '', gst_amount: '', gst_mode: 'percentage', gst_rate: '18', irn_number: '', notes: '', item_services: ['']
         });
       } else {
         throw new Error(parsed.error || `Server error ${parsed.status}`);
@@ -341,8 +338,13 @@ export default function AccountsReceivable() {
             <input id="ar-due_date" type="date" name="due_date" value={formData.due_date} onChange={handleInputChange} required className="input-ui" />
           </div>
           <div>
-            <label className="label-ui" htmlFor="ar-amount">Net Amount (₹)</label>
+            <label className="label-ui" htmlFor="ar-amount">Amount Before Discount (₹)</label>
             <input id="ar-amount" type="number" name="amount" value={formData.amount} onChange={handleInputChange} required className="input-ui" />
+          </div>
+          <div>
+            <label className="label-ui" htmlFor="ar-discount_percent">Discount (%)</label>
+            <input id="ar-discount_percent" type="number" name="discount_percent" min="0" max="100" step="0.01" value={formData.discount_percent} onChange={handleInputChange} placeholder="Optional" className="input-ui" />
+            <p className="mt-1 text-xs text-muted">GST is calculated after this discount.</p>
           </div>
           <div>
             <label className="label-ui" htmlFor="ar-gst_mode">GST Calculation</label>
@@ -364,11 +366,15 @@ export default function AccountsReceivable() {
           <div>
             <label className="label-ui" htmlFor="ar-gst_amount">GST Amount (₹)</label>
             <input id="ar-gst_amount" type="number" name="gst_amount" value={formData.gst_amount} readOnly className="input-ui bg-slate-50" aria-describedby="ar-gst-help" />
-            <p id="ar-gst-help" className="mt-1 text-xs text-muted">Calculated on the net amount before GST. Confirm the rate against the service SAC classification.</p>
+            <p id="ar-gst-help" className="mt-1 text-xs text-muted">Calculated on the amount after discount and before GST.</p>
           </div>
           <div>
             <label className="label-ui" htmlFor="ar-irn_number">IRN Number</label>
             <input id="ar-irn_number" type="text" name="irn_number" value={formData.irn_number} onChange={handleInputChange} placeholder="Optional" className="input-ui" />
+          </div>
+          <div>
+            <label className="label-ui" htmlFor="ar-invoice_raised_by">Invoice raised by</label>
+            <input id="ar-invoice_raised_by" type="text" name="invoice_raised_by" value={formData.invoice_raised_by} onChange={handleInputChange} placeholder="Employee / admin name (optional)" className="input-ui" />
           </div>
 
           <div className="col-span-full">
@@ -413,13 +419,6 @@ export default function AccountsReceivable() {
             </button>
           </div>
 
-          <div className="flex h-[45px] items-center">
-            <label className="flex cursor-pointer items-center text-sm font-medium text-text">
-              <input type="checkbox" name="is_proforma" checked={formData.is_proforma} onChange={handleInputChange} className="mr-3 h-[18px] w-[18px]" />
-              Is Proforma Invoice?
-            </label>
-          </div>
-
           <button type="submit" disabled={saving} className="btn-ui btn-ui-primary h-[45px]">
             {saving ? 'Creating...' : 'Create Invoice'}
           </button>
@@ -433,9 +432,9 @@ export default function AccountsReceivable() {
           <table className="table-ui whitespace-nowrap text-sm">
             <thead>
               <tr>
-                <th>Customer</th>
-                <th>Invoice #</th>
-                <th>Dates</th>
+                <th>Customer / Invoice #</th>
+                <th>Invoice Date</th>
+                <th>Due Date</th>
                 <th>Gross</th>
                 <th>Balance Due</th>
                 <th>Status</th>
@@ -450,17 +449,16 @@ export default function AccountsReceivable() {
 
                 return (
                   <tr key={inv.id}>
-                    <td className="font-medium text-primary">
-                      {inv.cashflow_entities?.name || 'N/A'}
+                    <td className="leading-tight font-medium text-primary">
+                      <span className="block">{inv.cashflow_entities?.name || 'N/A'}</span>
+                      <span className="mt-1 block text-xs text-muted">Invoice #: {inv.invoice_number || '—'}</span>
+                      {inv.irn_number && <span className="mt-1 block text-xs text-muted">IRN: {inv.irn_number.substring(0, 10)}...</span>}
                       {inv.is_proforma && (
                         <span className="badge-ui badge-ui-warning ml-2 align-middle">Proforma</span>
                       )}
                     </td>
-                    <td>
-                      <div className="font-semibold">{inv.invoice_number}</div>
-                      {inv.irn_number && <div className="mt-1 text-xs text-muted">IRN: {inv.irn_number.substring(0, 10)}...</div>}
-                    </td>
-                    <td className="leading-tight"><span className="block text-xs text-muted">Invoice: {inv.invoice_date}</span><strong className="mt-1 block text-xs text-primary">Due: {inv.due_date || '—'}</strong></td>
+                    <td className="text-xs text-muted">{inv.invoice_date || '—'}</td>
+                    <td className="text-xs font-semibold text-primary">{inv.due_date || '—'}</td>
                     <td className="font-semibold text-primary tabular-nums"><details><summary className="cursor-pointer">₹{total.toLocaleString('en-IN')}</summary><span className="block text-xs text-muted">Net ₹{net.toLocaleString('en-IN')} · GST ₹{gst.toLocaleString('en-IN')}</span></details></td>
                     <td className="font-semibold text-amber-700 tabular-nums">₹{Number(inv.balance_due ?? total).toLocaleString('en-IN')}</td>
                     <td>

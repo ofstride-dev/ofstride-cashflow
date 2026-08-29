@@ -178,7 +178,7 @@ export default function PettyCash() {
             <label className="label-ui" htmlFor="pc-type">Type</label>
             <select id="pc-type" name="type" value={formData.type} onChange={handleInputChange} className="input-ui bg-white">
               <option value="OUT">Cash Out (Expense)</option>
-              <option value="IN">Cash In (Withdrawal)</option>
+              <option value="IN">Cash In (Deposit)</option>
             </select>
           </div>
 
