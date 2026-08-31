@@ -28,6 +28,7 @@ function App() {
         <Route path="/cashflow/login" element={<CashflowLogin />} />
         <Route path="/cashflow/expense/login" element={<CashflowLogin />} />
         <Route path="/reset-password" element={<CashflowResetPassword />} />
+        <Route path="/cashflow/reset-password" element={<CashflowResetPassword />} />
         <Route path="/invite/accept" element={<AcceptInvite />} />
 
         {/* Setup and invite routes must be reachable before a company exists. */}

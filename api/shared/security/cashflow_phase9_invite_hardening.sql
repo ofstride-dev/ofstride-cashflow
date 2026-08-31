@@ -24,11 +24,11 @@ BEGIN
   END IF;
 
   -- Expired invites must not remain apparently pending in the admin UI.
-  UPDATE public.company_invites
+  UPDATE public.company_invites AS ci
   SET status = 'expired'
-  WHERE company_id = public.my_company_id()
-    AND status = 'pending'
-    AND expires_at <= now();
+  WHERE ci.company_id = public.my_company_id()
+    AND ci.status = 'pending'
+    AND ci.expires_at <= now();
 
   RETURN QUERY
     SELECT ci.id, ci.email, (ci.role)::text, ci.status,
