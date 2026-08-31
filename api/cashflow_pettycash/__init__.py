@@ -44,10 +44,12 @@ def _is_missing_column_error(exc: Exception) -> bool:
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info('Processing Petty Cash request.')
-    action = req.route_params.get("action")
-
-    auth = require_cashflow_tenant(req)
+    logging.info('Rejected retired petty cash request.')
+    return func.HttpResponse(
+        json.dumps({"ok": False, "error": "Petty Cash has been retired. Submit employee expenses through the Expense Portal."}),
+        mimetype="application/json",
+        status_code=410,
+    )
     if not auth["ok"]:
         return func.HttpResponse(
             json.dumps({"ok": False, "error": auth["error"]}),

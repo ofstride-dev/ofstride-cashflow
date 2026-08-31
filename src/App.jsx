@@ -10,7 +10,6 @@ import CashflowResetPassword from './pages/cashflow/CashflowResetPassword'
 
 import AccountsPayable from './components/cashflow/AccountsPayable'
 import AccountsReceivable from './components/cashflow/AccountsReceivable'
-import PettyCash from './components/cashflow/PettyCash'
 import BankStatementReconcile from './components/cashflow/BankStatementReconcile'
 
 import MyExpenses from './pages/expenses/MyExpenses'
@@ -65,8 +64,9 @@ function App() {
           <Route path="/cashflow/ap" element={<AccountsPayable />} />
           <Route path="/ar" element={<AccountsReceivable />} />
           <Route path="/cashflow/ar" element={<AccountsReceivable />} />
-          <Route path="/petty-cash" element={<PettyCash />} />
-          <Route path="/cashflow/pettycash" element={<PettyCash />} />
+          {/* Petty Cash was retired; preserve old bookmarks by routing claims to the portal. */}
+          <Route path="/petty-cash" element={<Navigate to="/cashflow/expense" replace />} />
+          <Route path="/cashflow/pettycash" element={<Navigate to="/cashflow/expense" replace />} />
           <Route path="/reconcile" element={<BankStatementReconcile />} />
           <Route path="/cashflow/reconcile" element={<BankStatementReconcile />} />
 

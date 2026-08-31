@@ -1,11 +1,19 @@
 import { supabase } from "./supabase";
 
 export const EXPENSE_CATEGORIES = [
-  "Travel",
-  "Client Meals/Entertainment",
-  "Equipment/Hardware",
-  "Software/Subscriptions",
-  "Office/Misc",
+  "Meals & Entertainment",
+  "Travel & Transport",
+  "Travel Stay",
+  "Office Supplies",
+  "Equipment & Hardware",
+  "Software & Subscriptions",
+  "Utilities & Telecom",
+  "Repairs & Maintenance",
+  "Marketing & Promotion",
+  "Taxes & Compliance",
+  "Health & Safety",
+  "Logistics & Courier",
+  "Other Operating Expenses",
 ];
 
 export const EXPENSE_STATUSES = [

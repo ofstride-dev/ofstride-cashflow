@@ -153,7 +153,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             raise
         tx_rows = window["transactions"]
         all_tx_rows = window["all_transactions"]
-        petty_rows = window["petty_cash"]
+        expense_rows = window["expenses"]
         pending_ar_rows = window["pending_invoices"]
         payable_rows = window["payable_bills"]
         accrued_invoice_rows = window["accrued_invoices"]
@@ -173,17 +173,17 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 return create_response(200, True, data=_empty_dashboard(start_date, end_date, applied_period))
             raise
         trend_tx_rows = trend["transactions"]
-        trend_petty_rows = trend["petty_cash"]
+        trend_expense_rows = trend["expenses"]
 
         tx_data = tx_rows.data or []
         cash_received = round(sum(_safe_float(r.get("amount")) for r in tx_data if str(r.get("transaction_type") or "").upper() == "INFLOW"), 2)
         ap_paid = round(sum(_safe_float(r.get("amount")) for r in tx_data if str(r.get("transaction_type") or "").upper() == "OUTFLOW"), 2)
 
-        petty_cash_in = round(sum(_safe_float(r.get("cash_in")) for r in (petty_rows.data or [])), 2)
-        petty_cash_out = round(sum(_safe_float(r.get("cash_out")) for r in (petty_rows.data or [])), 2)
-
-        cash_inflow = round(cash_received + petty_cash_in, 2)
-        cash_outflow = round(ap_paid + petty_cash_out, 2)
+        cash_inflow = cash_received
+        # Approved claims are represented by employee-reimbursement outflow
+        # transactions created by the database trigger, so do not add the
+        # expense rows a second time here.
+        cash_outflow = ap_paid
         net_cash_position = round(cash_inflow - cash_outflow, 2)
 
         invoice_paid = {}
@@ -211,7 +211,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             aging_summary["ap"][key] += balance
         for section in aging_summary.values():
             for key in section: section[key] = round(section[key], 2)
-        petty_cash_balance = round(petty_cash_in - petty_cash_out, 2)
+        petty_cash_balance = 0
 
         avg_daily_outflow = (cash_outflow / days_in_window) if days_in_window else 0.0
         book_balance = round(sum(_safe_float(r.get("amount")) for r in (all_tx_rows.data or []) if str(r.get("transaction_type") or "").upper() == "INFLOW") - sum(_safe_float(r.get("amount")) for r in (all_tx_rows.data or []) if str(r.get("transaction_type") or "").upper() == "OUTFLOW"), 2)
@@ -262,15 +262,16 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             if str(row.get("transaction_type") or "").upper() == "OUTFLOW":
                 series_by_month[key]["outflow"] += amt
 
-        for row in (trend_petty_rows.data or []):
-            tx_date = _to_date(row.get("entry_date"))
+        for row in (trend_expense_rows.data or []):
+            if str(row.get("status") or "").lower() not in {"approved", "ready_for_payment", "paid"}:
+                continue
+            tx_date = _to_date(row.get("spend_date"))
             if not tx_date:
                 continue
             key = tx_date.strftime("%Y-%m")
             if key not in series_by_month:
                 continue
-            series_by_month[key]["inflow"] += _safe_float(row.get("cash_in"))
-            series_by_month[key]["outflow"] += _safe_float(row.get("cash_out"))
+            series_by_month[key]["outflow"] += _safe_float(row.get("amount"))
 
         monthly_series = []
         for key in sorted(series_by_month.keys()):
@@ -294,13 +295,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 "cash_inflow": cash_inflow,
                 "cash_outflow": cash_outflow,
                 "net_cash_position": net_cash_position,
-                "petty_cash_balance": petty_cash_balance,
+                "petty_cash_balance": 0,
                 "runway_months": runway_months,
                 "book_balance": book_balance,
                 "inflow_from_customers": cash_received,
-                "inflow_from_petty_cash": petty_cash_in,
+                "inflow_from_petty_cash": 0,
                 "outflow_to_vendors": ap_paid,
-                "outflow_from_petty_cash": petty_cash_out,
+                "outflow_from_petty_cash": 0,
                 "accrued_revenue": accrued_revenue,
                 "accrued_expenses": accrued_expenses,
                 "direct_expenses": direct_expenses,

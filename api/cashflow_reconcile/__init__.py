@@ -276,7 +276,7 @@ def _platform_rows(client: Any, company_id: str, start: str, end: str) -> list[d
     queries = [
         ("cashflow_bills", "bill_date", "bill_number", "vendor_id", "amount", "ap", "debit"),
         ("cashflow_invoices", "invoice_date", "invoice_number", "customer_id", "amount", "ar", "credit"),
-        ("cashflow_petty_cash", "entry_date", None, None, None, "petty_cash", None),
+        ("expenses", "spend_date", None, "user_id", "amount", "employee_expense", "debit"),
     ]
     for table, date_col, number_col, entity_col, amount_col, kind, expected_direction in queries:
         query = client.table(table).select("*").eq("company_id", company_id).gte(date_col, start).lte(date_col, end)
@@ -287,14 +287,8 @@ def _platform_rows(client: Any, company_id: str, start: str, end: str) -> list[d
             response = client.table("cashflow_entities").select("id,name").eq("company_id", company_id).in_("id", list(entity_ids)).execute()
             entities = {str(x["id"]): x.get("name", "") for x in (response.data or [])}
         for item in data:
-            if kind == "petty_cash":
-                amount = _money(item.get("cash_out")) or _money(item.get("cash_in")) or Decimal("0")
-                direction = "debit" if (_money(item.get("cash_out")) or 0) > 0 else "credit"
-                number = item.get("id")
-                party = item.get("description")
-            else:
-                amount = _money(item.get(amount_col)) or Decimal("0")
-                direction = expected_direction; number = item.get(number_col); party = entities.get(str(item.get(entity_col)), "")
+            amount = _money(item.get(amount_col)) or Decimal("0")
+            direction = expected_direction; number = item.get(number_col); party = entities.get(str(item.get(entity_col)), "")
             rows.append({"id": item.get("id"), "kind": kind, "voucher_number": _text(number), "voucher_date": _text(item.get(date_col)), "party_name": _text(party), "amount": float(abs(amount)), "direction": direction, "raw_data": item})
     return rows
 

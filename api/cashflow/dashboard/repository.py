@@ -33,9 +33,9 @@ class DashboardRepository:
                 "cashflow_transactions", "amount,invoice_id,bill_id,transaction_type", context,
                 transaction_date=("gte", start_key), transaction_date_end=("lte", end_key),
             ),
-            "petty_cash": self._query(
-                "cashflow_petty_cash", "cash_in,cash_out", context,
-                entry_date=("gte", start_key), entry_date_end=("lte", end_key),
+            "expenses": self._query(
+                "expenses", "id,amount,spend_date,category,description,status,user_id", context,
+                spend_date=("gte", start_key), spend_date_end=("lte", end_key),
             ),
             "pending_invoices": self._query(
                 "cashflow_invoices",
@@ -64,8 +64,8 @@ class DashboardRepository:
                 "transaction_date,amount,invoice_id,bill_id,transaction_type", context,
                 transaction_date=("gte", start_key), transaction_date_end=("lte", end_key),
             ),
-            "petty_cash": self._query(
-                "cashflow_petty_cash", "entry_date,cash_in,cash_out", context,
-                entry_date=("gte", start_key), entry_date_end=("lte", end_key),
+            "expenses": self._query(
+                "expenses", "id,amount,spend_date,category,description,status,user_id", context,
+                spend_date=("gte", start_key), spend_date_end=("lte", end_key),
             ),
         }

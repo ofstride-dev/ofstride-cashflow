@@ -10,7 +10,6 @@ import {
   Menu,
   Receipt,
   UserPlus,
-  Wallet,
   X,
 } from 'lucide-react';
 import { cashflowFetch } from '../../services/cashflowApi';
@@ -22,7 +21,6 @@ const NAV_ITEMS = [
   { label: 'Dashboard', path: '/cashflow/dashboard', icon: LayoutDashboard },
   { label: 'Payables (AP)', path: '/cashflow/ap', icon: ArrowUpCircle },
   { label: 'Receivables (AR)', path: '/cashflow/ar', icon: ArrowDownCircle },
-  { label: 'Petty Cash', path: '/cashflow/pettycash', icon: Wallet },
   { label: 'Bank Reconcile', path: '/cashflow/reconcile', icon: GitCompareArrows },
   { label: 'Expense Portal', path: '/cashflow/expense', icon: Receipt },
 ];

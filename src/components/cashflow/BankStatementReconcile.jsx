@@ -196,7 +196,7 @@ export default function BankStatementReconcile() {
       <section className="card-ui p-5 sm:p-6">
         <h2 className="text-2xl font-bold text-primary">Bank Statement Reconcile</h2>
         <p className="text-sm text-slate-600 mt-1">
-          Compare uploaded bank receipts, transactions, and statements with AP, AR, and Petty Cash records to identify mismatches before final posting.
+          Compare uploaded bank receipts, transactions, and statements with AP, AR, and employee expense records to identify mismatches before final posting.
         </p>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
@@ -289,7 +289,7 @@ export default function BankStatementReconcile() {
         {comparisonMode && (
           <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
             <span className="font-semibold">Mode:</span>{' '}
-            {comparisonMode === 'platform' ? 'Platform comparison enabled (AP/AR/Petty Cash).' : 'Bank statement only.'}
+            {comparisonMode === 'platform' ? 'Platform comparison enabled (AP/AR/Employee Expenses).' : 'Bank statement only.'}
           </div>
         )}
 
