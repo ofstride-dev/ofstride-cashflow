@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { UploadCloud, ChevronDown } from "lucide-react";
+import { useParams } from "react-router-dom";
+import { UploadCloud, ChevronDown, Trash2 } from "lucide-react";
 import { useCashflowAuth } from "../../context/CashflowAuthContext";
-import { createExpense, EXPENSE_CATEGORIES } from "../../services/expenseService";
+import { createExpense, getExpense, updateExpenseClaim, deleteExpense, EXPENSE_CATEGORIES } from "../../services/expenseService";
 import { uploadReceipt } from "../../services/attachmentService";
 
 const MAX_RECEIPT_SIZE = 10 * 1024 * 1024; // 10 MB before compression
@@ -14,6 +15,8 @@ const inputClass =
 function SubmitExpense() {
   const { user, profile } = useCashflowAuth();
   const navigate = useNavigate();
+  const { id } = useParams();
+  const isEditing = Boolean(id);
 
   const [formData, setFormData] = useState({
     amount: "",
@@ -33,6 +36,35 @@ function SubmitExpense() {
   const [receiptFile, setReceiptFile] = useState(null);
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [loadingClaim, setLoadingClaim] = useState(isEditing);
+  const [deleting, setDeleting] = useState(false);
+  const [editableClaim, setEditableClaim] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    getExpense(id).then((claim) => {
+      if (claim.user_id !== user?.id || !["draft", "pending", "submitted"].includes(String(claim.status || "").toLowerCase())) {
+        setSubmitError("This claim can no longer be edited.");
+        return;
+      }
+      setEditableClaim(true);
+      setFormData((previous) => ({ ...previous, ...Object.fromEntries(Object.keys(previous).map((key) => [key, claim[key] ?? previous[key]])) }));
+    }).catch((error) => setSubmitError(error?.message || "Could not load this claim."))
+      .finally(() => setLoadingClaim(false));
+  }, [id, user?.id]);
+
+  const handleDelete = async () => {
+    if (!editableClaim || !window.confirm("Are you sure you want to delete this claim? This action cannot be undone.")) return;
+    setDeleting(true);
+    setSubmitError("");
+    try {
+      await deleteExpense(id);
+      navigate("/cashflow/expense");
+    } catch (error) {
+      setSubmitError(error?.message || "Could not delete this claim.");
+      setDeleting(false);
+    }
+  };
 
   const handleChange = (event) => {
     const { name, value, type, checked } = event.target;
@@ -131,13 +163,13 @@ function SubmitExpense() {
         payload.igst = null;
       }
 
-      const expense = await createExpense(payload);
+      const expense = isEditing ? await updateExpenseClaim(id, payload) : await createExpense(payload);
 
       if (receiptFile) {
         await uploadReceipt(receiptFile, user.id, expense.id, companyId);
       }
 
-      navigate(`/cashflow/expense/${expense.id}`);
+      navigate(`/cashflow/expense/${expense?.id || id}`);
     } catch (error) {
       setSubmitError(error?.message || "Submission failed. Please try again.");
     } finally {
@@ -149,7 +181,17 @@ function SubmitExpense() {
     <div className="bg-surface">
       <section className="py-2 sm:py-3 lg:py-4">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h1 className="text-2xl font-semibold text-primary mb-6">Submit Expense Claim</h1>
+          <div className="mb-6 flex items-center justify-between gap-4">
+            <h1 className="text-2xl font-semibold text-primary">{isEditing ? "Edit Expense Claim" : "Submit Expense Claim"}</h1>
+            {isEditing && editableClaim && (
+              <button type="button" onClick={handleDelete} disabled={deleting || submitting} className="btn-ui btn-ui-danger">
+                <Trash2 className="w-4 h-4" />
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+            )}
+          </div>
+
+          {loadingClaim && <p className="text-sm text-muted mb-4">Loading claim...</p>}
 
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             {submitError && (

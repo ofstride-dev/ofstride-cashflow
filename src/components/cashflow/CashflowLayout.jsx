@@ -8,7 +8,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Receipt,
+  IndianRupee,
   UserPlus,
   X,
 } from 'lucide-react';
@@ -22,7 +22,7 @@ const NAV_ITEMS = [
   { label: 'Payables (AP)', path: '/cashflow/ap', icon: ArrowUpCircle },
   { label: 'Receivables (AR)', path: '/cashflow/ar', icon: ArrowDownCircle },
   { label: 'Bank Reconcile', path: '/cashflow/reconcile', icon: GitCompareArrows },
-  { label: 'Expense Portal', path: '/cashflow/expense', icon: Receipt },
+  { label: 'Expense Portal', path: '/cashflow/expense', icon: IndianRupee },
 ];
 
 function initialsFor(nameOrEmail) {

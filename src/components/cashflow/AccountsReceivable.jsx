@@ -9,6 +9,7 @@ import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
 import { supabase } from '../../services/supabase';
+import CollectAmountModal from './CollectAmountModal';
 
 const GST_SERVICE_RATES = [
   { value: '0', label: 'GST-exempt service (0%)' },
@@ -41,6 +42,7 @@ export default function AccountsReceivable() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [approvingId, setApprovingId] = useState('');
+  const [collectInvoice, setCollectInvoice] = useState(null);
   
   const [formData, setFormData] = useState({
     customer_name: '', customer_gstin: '', invoice_number: '', invoice_raised_by: '', discount_percent: '',
@@ -78,7 +80,14 @@ export default function AccountsReceivable() {
   };
 
   const downloadInvoice = (invoice) => {
-    const subtotal = Number(invoice?.amount || 0);
+    const discountPercent = Math.min(100, Math.max(0, Number(invoice?.discount_percent || 0)));
+    // AR persists `amount` as the post-discount taxable value. Reconstruct the
+    // gross value only for the invoice presentation so discount is not applied twice.
+    const subtotal = Math.max(0, Number(invoice?.amount || 0));
+    const grossBeforeDiscount = discountPercent < 100
+      ? subtotal / (1 - discountPercent / 100)
+      : subtotal;
+    const discountAmount = Math.max(0, grossBeforeDiscount - subtotal);
     const gst = Number(invoice?.gst_amount || 0);
     const total = subtotal + gst;
     const items = getInvoiceItems(invoice);
@@ -86,7 +95,8 @@ export default function AccountsReceivable() {
     const seller = companyDetails;
     const sellerName = seller.legal_name || seller.name || profile?.company_name || '';
     const tax = gst;
-    const cgst = ''; const sgst = ''; const igst = '';
+    const gstRate = subtotal > 0 ? (gst / subtotal) * 100 : 0;
+    const cgst = 0; const sgst = 0; const igst = gst;
 
     const html = `<!doctype html>
 <html>
@@ -94,20 +104,20 @@ export default function AccountsReceivable() {
     <meta charset="utf-8" />
     <title>Invoice ${invoice?.invoice_number || ''}</title>
     <style>
-      * { box-sizing: border-box; } body { font-family: Arial, sans-serif; margin: 0; padding: 28px; color: #172033; font-size: 12px; } .invoice { max-width: 900px; margin: auto; border: 1px solid #cbd5e1; } .header { display: flex; justify-content: space-between; gap: 24px; padding: 22px; border-bottom: 2px solid #172033; } h1 { margin: 0 0 8px; font-size: 24px; letter-spacing: .08em; } h2 { margin: 0 0 8px; font-size: 17px; } .muted { color: #64748b; line-height: 1.5; } .meta { min-width: 245px; } .meta div, .summary-row { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; } .section { padding: 16px 22px; border-bottom: 1px solid #cbd5e1; } .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; } table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #cbd5e1; padding: 9px 8px; vertical-align: top; } th { background: #eef2f7; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; } .right { text-align: right; } .totals { margin-left: auto; width: 360px; } .grand { font-size: 15px; font-weight: bold; background: #eef2f7; } .footer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; } .sign { min-height: 75px; text-align: center; padding-top: 35px; } @media print { body { padding: 0; } .invoice { border: 0; } }
+      * { box-sizing: border-box; } body { font-family: Arial, sans-serif; margin: 0; padding: 28px; color: #172033; font-size: 12px; } .invoice { max-width: 900px; margin: auto; border: 1px solid #172033; } .header { display: flex; justify-content: space-between; gap: 24px; padding: 22px; border-bottom: 1px solid #172033; } h1 { margin: 0 0 8px; font-size: 24px; letter-spacing: .08em; } h2 { margin: 0 0 8px; font-size: 17px; } .muted { color: #64748b; line-height: 1.5; } .meta { min-width: 245px; } .meta div, .summary-row { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; } .section { padding: 16px 22px; border-bottom: 1px solid #172033; } .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; } .party { min-height: 145px; } table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #172033; padding: 9px 8px; vertical-align: top; } th { background: #eef2f7; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; } .right { text-align: right; } .totals { margin-left: auto; width: 390px; } .grand { font-size: 15px; font-weight: bold; background: #eef2f7; } .tax-table { margin-top: 16px; } .footer-grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 25px; } .sign { min-height: 75px; text-align: center; padding-top: 35px; } .declaration { line-height: 1.5; } @media print { body { padding: 0; } .invoice { border: 0; } }
     </style>
   </head>
   <body><div class="invoice">
-    <div class="header"><div><h2>${escapeHtml(sellerName)}</h2><div class="muted">${escapeHtml(seller.billing_address)}</div><div>${escapeHtml(seller.phone)}</div><div>GSTIN: ${escapeHtml(seller.gstin)}</div><div>PAN: ${escapeHtml(seller.pan)}</div></div><div class="meta"><h1>TAX INVOICE</h1><div><b>Invoice No.</b><span>${escapeHtml(invoice?.invoice_number)}</span></div><div><b>Invoice Date</b><span>${escapeHtml(invoice?.invoice_date)}</span></div><div><b>Due Date</b><span>${escapeHtml(invoice?.due_date)}</span></div><div><b>IRN</b><span>${escapeHtml(invoice?.irn_number)}</span></div></div></div>
-    <div class="section parties"><div><b>Bill To</b><h2>${escapeHtml(customer)}</h2><div>Address: ${escapeHtml(invoice?.customer_address)}</div><div>GSTIN: ${escapeHtml(invoice?.cashflow_entities?.gstin)}</div></div><div><b>Place of Supply</b><div>State: ${escapeHtml(invoice?.place_of_supply_state)}</div><div>State Code: ${escapeHtml(invoice?.place_of_supply_code)}</div></div></div>
+    <div class="header"><div><h2>${escapeHtml(sellerName)}</h2><div class="muted">${escapeHtml(seller.billing_address)}</div><div>${escapeHtml(seller.phone)}</div><div>GSTIN: ${escapeHtml(seller.gstin)}</div><div>PAN: ${escapeHtml(seller.pan)}</div></div><div class="meta"><h1>TAX INVOICE</h1><div><b>Invoice No.</b><span>${escapeHtml(invoice?.invoice_number)}</span></div><div><b>Dated</b><span>${escapeHtml(invoice?.invoice_date)}</span></div><div><b>Due Date</b><span>${escapeHtml(invoice?.due_date)}</span></div><div><b>IRN</b><span>${escapeHtml(invoice?.irn_number)}</span></div></div></div>
+    <div class="section parties"><div class="party"><b>Buyer (Bill to):</b><h2>${escapeHtml(customer)}</h2><div>Address: ${escapeHtml(invoice?.customer_address)}</div><div>GSTIN/UIN: ${escapeHtml(invoice?.cashflow_entities?.gstin)}</div><div>PAN/IT No: ${escapeHtml(invoice?.customer_pan)}</div></div><div class="party"><b>Place of Supply</b><div>State: ${escapeHtml(invoice?.place_of_supply_state)}</div><div>State Code: ${escapeHtml(invoice?.place_of_supply_code)}</div><br><b>Terms of Payment</b><div>${escapeHtml(invoice?.payment_terms || 'As agreed')}</div></div></div>
     <div class="section"><table>
       <thead>
-        <tr><th>#</th><th>Description</th><th>HSN/SAC Code</th><th>Quantity</th><th>Unit Rate</th><th class="right">Total Amount</th></tr>
+        <tr><th>Sl. No.</th><th>Particulars</th><th>HSN/SAC</th><th>Quantity</th><th class="right">Rate</th><th class="right">Amount (₹)</th></tr>
       </thead>
       <tbody>
-        ${(items.length ? items : ['']).map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item)}</td><td>${escapeHtml(invoice?.hsn_sac_code || seller.default_hsn_sac)}</td><td>${escapeHtml(invoice?.quantity)}</td><td class="right">${escapeHtml(invoice?.unit_rate)}</td><td class="right">${index === 0 ? `₹${subtotal.toFixed(2)}` : ''}</td></tr>`).join('')}
+        ${(items.length ? items : ['']).map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item)}</td><td>${escapeHtml(invoice?.hsn_sac_code || seller.default_hsn_sac)}</td><td>${escapeHtml(invoice?.quantity || '')}</td><td class="right">${escapeHtml(invoice?.unit_rate || '')}</td><td class="right">${index === 0 ? `₹${grossBeforeDiscount.toFixed(2)}` : ''}</td></tr>`).join('')}
       </tbody>
-    </table></div><div class="section"><div class="totals"><div class="summary-row"><span>Subtotal (Taxable Amount)</span><b>₹${subtotal.toFixed(2)}</b></div><div class="summary-row"><span>CGST</span><span>${cgst ? `₹${cgst}` : ''}</span></div><div class="summary-row"><span>SGST</span><span>${sgst ? `₹${sgst}` : ''}</span></div><div class="summary-row"><span>IGST</span><span>${igst ? `₹${igst}` : ''}</span></div><div class="summary-row"><span>GST Total</span><b>₹${tax.toFixed(2)}</b></div><div class="summary-row grand"><span>Grand Total</span><span>₹${total.toFixed(2)}</span></div></div></div><div class="section footer-grid"><div><b>Total Amount in Words</b><p>${escapeHtml(amountInWords(total))}</p><b>Bank Account Details</b><p class="muted">Bank: ${escapeHtml(seller.bank_name)}<br>Account Number: ${escapeHtml(seller.bank_account_number)}<br>IFSC Code: ${escapeHtml(seller.bank_ifsc)}</p></div><div><b>For ${escapeHtml(sellerName)}</b><div class="sign">Authorized Signatory</div></div></div></div></body>
+    </table></div><div class="section"><div class="totals"><div class="summary-row"><span>Gross Amount</span><b>₹${grossBeforeDiscount.toFixed(2)}</b></div><div class="summary-row"><span>Discount (${discountPercent.toFixed(2)}%)</span><b>- ₹${discountAmount.toFixed(2)}</b></div><div class="summary-row"><span>Net Taxable Value</span><b>₹${subtotal.toFixed(2)}</b></div><div class="summary-row"><span>CGST</span><span>₹${cgst.toFixed(2)}</span></div><div class="summary-row"><span>SGST</span><span>₹${sgst.toFixed(2)}</span></div><div class="summary-row"><span>IGST (${gstRate.toFixed(2)}%)</span><span>₹${igst.toFixed(2)}</span></div><div class="summary-row"><span>Total Tax Amount</span><b>₹${tax.toFixed(2)}</b></div><div class="summary-row grand"><span>Total</span><span>₹${total.toFixed(2)}</span></div></div><table class="tax-table"><thead><tr><th>HSN/SAC</th><th>Taxable Value</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total Tax</th></tr></thead><tbody><tr><td>${escapeHtml(invoice?.hsn_sac_code || seller.default_hsn_sac)}</td><td>₹${subtotal.toFixed(2)}</td><td>₹${cgst.toFixed(2)}</td><td>₹${sgst.toFixed(2)}</td><td>₹${igst.toFixed(2)}</td><td>₹${tax.toFixed(2)}</td></tr></tbody></table></div><div class="section footer-grid"><div><b>Amount Chargeable (in words)</b><p>${escapeHtml(amountInWords(total))}</p><b>Tax Amount (in words)</b><p>${escapeHtml(amountInWords(tax))}</p><b>Company's Bank Details</b><p class="muted">Bank: ${escapeHtml(seller.bank_name)}<br>Account Number: ${escapeHtml(seller.bank_account_number)}<br>IFSC Code: ${escapeHtml(seller.bank_ifsc)}</p><p class="declaration"><b>Declaration:</b><br>We declare that this invoice shows the actual price of the goods/services described and that all particulars are true and correct.</p></div><div><b>For ${escapeHtml(sellerName)}</b><div class="sign">Authorised Signatory</div><p class="muted">This is a computer-generated invoice and does not require signature.</p></div></div></div></body>
 </html>`;
 
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
@@ -198,12 +208,7 @@ export default function AccountsReceivable() {
     }
   };
 
-  const handleRecordPayment = async (invoice) => {
-    const paymentAmount = window.prompt(
-      `Record payment for ${invoice.invoice_number}\nEnter amount (Total: ₹${(invoice.amount + invoice.gst_amount)}):`, 
-      invoice.amount + invoice.gst_amount
-    );
-    if (!paymentAmount) return;
+  const handleRecordPayment = async (invoice, paymentAmount) => {
     const requestIdentityKey = authIdentityKey;
 
     try {
@@ -220,6 +225,7 @@ export default function AccountsReceivable() {
       if (activeIdentityKeyRef.current !== requestIdentityKey) return;
       if (parsed.ok) {
         alert("Payment recorded successfully!");
+        setCollectInvoice(null);
         fetchInvoices(() => activeIdentityKeyRef.current === requestIdentityKey);
       } else {
         throw new Error(parsed.error || `Server error ${parsed.status}`);
@@ -478,7 +484,7 @@ export default function AccountsReceivable() {
                           </button>
                         )}
                         {inv.status !== 'paid' && !inv.is_proforma && (
-                          <button onClick={() => handleRecordPayment(inv)} className="btn-ui btn-ui-sm btn-ui-info">
+                           <button onClick={() => setCollectInvoice(inv)} className="btn-ui btn-ui-sm btn-ui-info">
                             Collect
                           </button>
                         )}
@@ -501,6 +507,16 @@ export default function AccountsReceivable() {
           </table>
         )}
       </div>
+      <CollectAmountModal
+        key={collectInvoice?.id || 'ar-collect'}
+        open={Boolean(collectInvoice)}
+        onClose={() => setCollectInvoice(null)}
+        onConfirm={(amount) => handleRecordPayment(collectInvoice, amount)}
+        documentLabel="Invoice"
+        documentNumber={collectInvoice?.invoice_number}
+        grossAmount={Number(collectInvoice?.amount || 0) + Number(collectInvoice?.gst_amount || 0)}
+        remainingBalance={collectInvoice ? Number(collectInvoice.balance_due ?? (Number(collectInvoice.amount || 0) + Number(collectInvoice.gst_amount || 0))) : 0}
+      />
     </div>
   );
 }

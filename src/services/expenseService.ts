@@ -124,6 +124,25 @@ export async function getExpense(id: string) {
   return data;
 }
 
+/** Delete a claimant-owned draft/pending claim through the guarded server RPC. */
+export async function deleteExpense(expenseId: string) {
+  const { data, error } = await supabase.rpc("delete_expense_claim", {
+    p_expense_id: expenseId,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/** Update editable claim fields; the RPC enforces claimant ownership and status. */
+export async function updateExpenseClaim(expenseId: string, payload: Record<string, unknown>) {
+  const { data, error } = await supabase.rpc("update_expense_claim", {
+    p_expense_id: expenseId,
+    p_claim: payload,
+  });
+  if (error) throw error;
+  return data;
+}
+
 // Atomic, server-validated status transition.
 // Delegates to the `transition_expense_status` Postgres RPC so the status
 // update + audit-history insert run in a single transaction, the legal state

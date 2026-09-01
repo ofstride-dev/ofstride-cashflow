@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
-  Banknote,
   Gauge,
-  PiggyBank,
   Sparkles,
   MessageCircle,
   Languages,
@@ -31,6 +29,18 @@ import { useCashflowAuth } from '../../context/CashflowAuthContext';
 function formatMoney(value) {
   const amount = Number(value || 0);
   return `₹${amount.toLocaleString('en-IN')}`;
+}
+
+function resolveDashboardPeriod(periodKey, customStartDate, customEndDate) {
+  if (periodKey === 'custom') return { start_date: customStartDate, end_date: customEndDate };
+  const today = new Date();
+  const end = today.toISOString().slice(0, 10);
+  const start = new Date(today);
+  if (periodKey === '1d') return { start_date: end, end_date: end };
+  if (periodKey === '7d') start.setDate(start.getDate() - 6);
+  else if (periodKey === '30d') start.setDate(start.getDate() - 29);
+  else start.setDate(1);
+  return { start_date: start.toISOString().slice(0, 10), end_date: end };
 }
 
 const PERIOD_OPTIONS = [
@@ -195,10 +205,15 @@ export default function CashflowDashboard() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiCoverage, setAiCoverage] = useState(null);
+  const analystRequestIdRef = useRef(0);
+  const analystAbortRef = useRef(null);
+  const [aiDetails, setAiDetails] = useState({ findings: [], risks: [], actions: [] });
   const [reportSending, setReportSending] = useState(false);
   const [reportMessage, setReportMessage] = useState('');
   const [scheduledReports, setScheduledReports] = useState(false);
   const [showNetDetails, setShowNetDetails] = useState(false);
+  const [guideSlide, setGuideSlide] = useState(0);
+  const guideTouchStartRef = useRef(null);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const canSendReport = ['owner', 'admin', 'finance'].includes(String(profile?.role || '').toLowerCase());
   const canManageScheduledReports = ['owner', 'admin'].includes(String(profile?.role || '').toLowerCase());
@@ -243,11 +258,18 @@ export default function CashflowDashboard() {
   };
 
   const runAiPrompt = async (intent, question = '') => {
+    const requestId = ++analystRequestIdRef.current;
+    analystAbortRef.current?.abort();
+    const controller = new AbortController();
+    analystAbortRef.current = controller;
+    const timeoutId = window.setTimeout(() => controller.abort(), 45000);
     setAiLoading(true);
     setAiError('');
+    setAiDetails({ findings: [], risks: [], actions: [] });
     try {
       const response = await cashflowFetch('/cashflow/analyst', {
         method: 'POST',
+        signal: controller.signal,
         body: JSON.stringify({
           intent,
           question: question.trim(),
@@ -257,15 +279,27 @@ export default function CashflowDashboard() {
       });
       const parsed = await parseCashflowResponse(response);
       if (!parsed.ok) throw new Error(parsed.error || 'Analyst unavailable');
+      if (requestId !== analystRequestIdRef.current) return;
       setAiResponse(parsed.data?.answer || parsed.data?.headline || 'No analyst response was returned.');
       setAiCoverage(parsed.data?.coverage || null);
+      setAiDetails({
+        findings: Array.isArray(parsed.data?.findings) ? parsed.data.findings : [],
+        risks: Array.isArray(parsed.data?.risks) ? parsed.data.risks : [],
+        actions: Array.isArray(parsed.data?.actions) ? parsed.data.actions : [],
+      });
       setAiQuestion('');
     } catch (error) {
-      setAiError(error instanceof Error ? error.message : 'Analyst unavailable');
+      if (requestId !== analystRequestIdRef.current) return;
+      setAiError(error?.name === 'AbortError' ? 'Analyst request timed out. Please try again.' : error instanceof Error ? error.message : 'Analyst unavailable');
       setAiCoverage(null);
+      setAiDetails({ findings: [], risks: [], actions: [] });
       setAiResponse('The analyst could not complete this request. Review the data coverage and try again.');
     } finally {
-      setAiLoading(false);
+      window.clearTimeout(timeoutId);
+      if (requestId === analystRequestIdRef.current) {
+        setAiLoading(false);
+        analystAbortRef.current = null;
+      }
     }
   };
 
@@ -276,12 +310,18 @@ export default function CashflowDashboard() {
 
   // Build a zero-filled dashboard payload so first-time users and API outages
   // always see empty (but valid) metrics instead of a hard failure.
-  const emptyDashboardData = useMemo(() => ({
+  const emptyDashboardData = useMemo(() => {
+    const fallbackPeriod = resolveDashboardPeriod(periodKey, customStartDate, customEndDate);
+    const start = new Date(fallbackPeriod.start_date);
+    const end = new Date(fallbackPeriod.end_date);
+    const days = Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())
+      ? 0
+      : Math.max(1, Math.round((end - start) / 86400000) + 1);
+    return ({
     period: {
       key: periodKey,
-      start_date: customStartDate,
-      end_date: todayIso,
-      days: 0,
+      ...fallbackPeriod,
+      days,
     },
     summary: {
       cash_received: 0,
@@ -296,13 +336,21 @@ export default function CashflowDashboard() {
       inflow_from_petty_cash: 0,
       outflow_to_vendors: 0,
       outflow_from_petty_cash: 0,
+      accrued_revenue: 0,
+      accrued_expenses: 0,
+      direct_expenses: 0,
+      net_profit_loss: 0,
+      aging_summary: { ar: { overdue: 0, due_soon: 0, not_due: 0 }, ap: { overdue: 0, due_soon: 0, not_due: 0 } },
     },
     msme_alerts: [],
     trend: { monthly: [] },
-  }), [periodKey, customStartDate, todayIso]);
+    });
+  }, [periodKey, customStartDate, customEndDate, todayIso]);
 
   useEffect(() => {
     let isCurrent = true;
+    analystRequestIdRef.current += 1;
+    analystAbortRef.current?.abort();
     setData(null);
     setReconcileRuns([]);
     setLoading(true);
@@ -497,7 +545,7 @@ export default function CashflowDashboard() {
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={aiLoading} onClick={() => runAiPrompt('summary')} className="ai-action-button"><MessageCircle className="h-4 w-4" /> Summarise reports</button>
             <button type="button" disabled={aiLoading} onClick={() => runAiPrompt('report')} className="ai-action-button"><FileText className="h-4 w-4" /> Generate report</button>
-            {canSendReport && <><button type="button" disabled={reportSending} onClick={() => sendReport('weekly')} className="ai-action-button"><FileText className="h-4 w-4" /> {reportSending ? 'Sending…' : 'Email weekly report'}</button><button type="button" disabled={reportSending} onClick={() => sendReport('monthly')} className="ai-action-button"><FileText className="h-4 w-4" /> Email monthly report</button></>}
+            {canSendReport && <><button type="button" disabled={reportSending || aiLoading} onClick={() => sendReport('weekly')} className="ai-action-button"><FileText className="h-4 w-4" /> {reportSending ? 'Sending…' : 'Email weekly report'}</button><button type="button" disabled={reportSending || aiLoading} onClick={() => sendReport('monthly')} className="ai-action-button"><FileText className="h-4 w-4" /> Email monthly report</button></>}
             {canManageScheduledReports && <label className="ai-action-button cursor-pointer"><input type="checkbox" checked={scheduledReports} disabled={scheduleLoading} onChange={toggleScheduledReports} className="accent-cyan-600" /> Weekly reports every Monday 9:00 AM IST</label>}
             <button type="button" disabled={aiLoading} onClick={() => runAiPrompt('explain_movement')} className="ai-action-button"><Languages className="h-4 w-4" /> Explain net movement</button>
             <button type="button" disabled={aiLoading} onClick={() => runAiPrompt('explain_metric', 'Accounts payable and receivables')} className="ai-action-button"><BarChart3 className="h-4 w-4" /> Explain AP / AR</button>
@@ -509,7 +557,7 @@ export default function CashflowDashboard() {
           {aiError && <p className="mt-2 text-xs text-rose-600">{aiError}</p>}
           {reportMessage && <p className="mt-2 text-xs text-cyan-700">{reportMessage}</p>}
           {aiCoverage?.unavailable?.length > 0 && <p className="mt-2 text-xs text-amber-700">Partial coverage: {aiCoverage.unavailable.join(', ')}.</p>}
-          <div className="ai-response mt-3"><Sparkles className="h-4 w-4 shrink-0" /><div className="min-w-0 flex-1">{aiLoading ? <AnalystLoadingStatus active /> : <p>{aiResponse}</p>}</div><RefreshCw className={`ml-auto h-3.5 w-3.5 shrink-0 opacity-50 ${aiLoading ? 'animate-spin' : ''}`} /></div>
+          <div className="ai-response mt-3"><Sparkles className="h-4 w-4 shrink-0" /><div className="min-w-0 flex-1">{aiLoading ? <AnalystLoadingStatus active /> : <><p>{aiResponse}</p>{aiDetails.findings.length > 0 && <div className="mt-3"><strong>Findings</strong><ul className="mt-1 list-disc pl-5">{aiDetails.findings.map((item, index) => <li key={`finding-${index}`}>{item}</li>)}</ul></div>}{aiDetails.risks.length > 0 && <div className="mt-3"><strong>Risks</strong><ul className="mt-1 list-disc pl-5">{aiDetails.risks.map((item, index) => <li key={`risk-${index}`}>{item}</li>)}</ul></div>}{aiDetails.actions.length > 0 && <div className="mt-3"><strong>Actions</strong><ul className="mt-1 list-disc pl-5">{aiDetails.actions.map((item, index) => <li key={`action-${index}`}>{item}</li>)}</ul></div>}</>}</div><RefreshCw className={`ml-auto h-3.5 w-3.5 shrink-0 opacity-50 ${aiLoading ? 'animate-spin' : ''}`} /></div>
         </div>
       </div>
 
@@ -536,7 +584,7 @@ export default function CashflowDashboard() {
           <SafeBar label="Paid to Vendors" value={periodBreakdown.outflowVendors} max={periodBreakdown.max} tone="rose" />
           <SafeBar label="Overdue Customer Receivables" value={periodBreakdown.overdueAr} max={periodBreakdown.max} tone="amber" />
           <SafeBar label="Overdue Vendor Payables" value={periodBreakdown.overdueAp} max={periodBreakdown.max} tone="rose" />
-          <div className="cashflow-ops mt-4 border-t border-slate-200 pt-4"><div className="flex items-center justify-between"><div><p className="dashboard-kicker">Cashflow operations</p><h4 className="mt-1 text-sm font-bold text-primary">Quotation pipeline</h4></div><Link to="/cashflow/receivables" className="text-xs font-bold text-secondary">View all</Link></div><div className="mt-3 grid grid-cols-3 gap-2"><div><strong className="text-base text-primary">12</strong><span>Open quotes</span></div><div><strong className="text-base text-amber-700">₹1.8L</strong><span>Awaiting decision</span></div><div><strong className="text-base text-emerald-700">4</strong><span>Due this week</span></div></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full w-[68%] rounded-full bg-gradient-to-r from-cyan-500 to-sky-400" /></div><p className="mt-1.5 text-[11px] text-slate-500">68% of quoted value has a next action assigned.</p></div>
+          <div className="cashflow-ops mt-4 border-t border-slate-200 pt-4"><div className="flex items-center justify-between"><div><p className="dashboard-kicker">Cashflow operations</p><h4 className="mt-1 text-sm font-bold text-primary">Quotation pipeline</h4></div><Link to="/cashflow/receivables" className="text-xs font-bold text-secondary">View all</Link></div><div className="mt-3 grid grid-cols-3 gap-2"><div><strong className="text-base text-primary">0</strong><span>Open quotes</span></div><div><strong className="text-base text-amber-700">₹0</strong><span>Awaiting decision</span></div><div><strong className="text-base text-emerald-700">0</strong><span>Due this week</span></div></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full w-0 rounded-full bg-gradient-to-r from-cyan-500 to-sky-400" /></div><p className="mt-1.5 text-[11px] text-slate-500">No quotations yet. Your pipeline will appear here as you create quotes.</p></div>
         </div>
       </div>
 
@@ -594,20 +642,33 @@ export default function CashflowDashboard() {
 
         <div className="dashboard-glass p-6">
           <div className="mb-4"><p className="dashboard-kicker">CashPulse guide</p><h3 className="mt-1 text-lg font-semibold text-white">Keep your cash position healthy</h3></div>
-          <div className="space-y-3 text-sm">
-            <div className="cashpulse-guide-item flex gap-3 rounded-xl border border-white/15 bg-white/[0.06] p-3">
-              <span className="cashpulse-guide-number mt-0.5 font-semibold">01</span>
-              <p className="cashpulse-guide-copy"><strong>Reconcile regularly.</strong> Upload your latest bank statement to identify missing or unexpected transactions.</p>
-            </div>
-            <div className="cashpulse-guide-item flex gap-3 rounded-xl border border-white/15 bg-white/[0.06] p-3">
-              <span className="cashpulse-guide-number mt-0.5 font-semibold">02</span>
-              <p className="cashpulse-guide-copy"><strong>Review due dates.</strong> Prioritize overdue receivables and upcoming payables before committing cash.</p>
-            </div>
-            <div className="cashpulse-guide-item flex gap-3 rounded-xl border border-white/15 bg-white/[0.06] p-3">
-              <span className="cashpulse-guide-number mt-0.5 font-semibold">03</span>
-              <p className="cashpulse-guide-copy"><strong>Keep books current.</strong> Add bank fees, subscriptions, and other unlinked activity as soon as it appears.</p>
-            </div>
-          </div>
+          {(() => {
+            const guideSlides = [
+              { title: 'Start with the CashPulse flow', copy: 'Set up your company billing details from the top-left profile area, then use the dashboard to see your cash position, inflows, outflows, and runway in one place.' },
+              { title: 'Stay ahead of AP and AR', copy: 'Create and review payables and receivables, watch due dates and balances, and record collections or vendor payments so your cash position stays current.' },
+              { title: 'Keep every rupee connected', copy: 'Upload bank statements for reconciliation, resolve unmatched transactions, and submit reimbursement claims in the Expense Portal so your books remain complete.' },
+            ];
+            const slide = guideSlides[guideSlide];
+            const previous = () => setGuideSlide((current) => (current + guideSlides.length - 1) % guideSlides.length);
+            const next = () => setGuideSlide((current) => (current + 1) % guideSlides.length);
+            return (
+              <div
+                className="text-sm"
+                onTouchStart={(event) => { guideTouchStartRef.current = event.touches[0].clientX; }}
+                onTouchEnd={(event) => { const start = guideTouchStartRef.current; if (start == null) return; const delta = event.changedTouches[0].clientX - start; if (Math.abs(delta) > 40) (delta < 0 ? next : previous)(); guideTouchStartRef.current = null; }}
+              >
+                <div className="cashpulse-guide-item min-h-28 rounded-xl border border-white/15 bg-white/[0.06] p-4">
+                  <div className="flex items-center justify-between gap-3"><span className="cashpulse-guide-number font-semibold">0{guideSlide + 1} / 03</span><span className="text-xs text-slate-500">Swipe to explore</span></div>
+                  <p className="cashpulse-guide-copy mt-3"><strong>{slide.title}.</strong> {slide.copy}</p>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <button type="button" onClick={previous} className="text-xs font-semibold text-secondary hover:text-secondary-hover">← Previous</button>
+                  <div className="flex gap-1.5" aria-label="CashPulse guide slides">{guideSlides.map((item, index) => <button key={item.title} type="button" aria-label={`Go to guide slide ${index + 1}`} aria-pressed={guideSlide === index} onClick={() => setGuideSlide(index)} className={`h-2 w-2 rounded-full ${guideSlide === index ? 'bg-cyan-500' : 'bg-slate-300'}`} />)}</div>
+                  <button type="button" onClick={next} className="text-xs font-semibold text-secondary hover:text-secondary-hover">Next →</button>
+                </div>
+              </div>
+            );
+          })()}
           <h3 className="mt-5 border-t border-white/10 pt-5 text-sm font-semibold text-white">MSME Compliance Alerts</h3>
           <div className="flex flex-col gap-3">
             {(data?.msme_alerts || []).map((alert, idx) => (

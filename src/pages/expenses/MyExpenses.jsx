@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Plus, ShieldCheck, Download, FileSpreadsheet, FileText } from "lucide-react";
+import { Plus, ShieldCheck, Download, FileSpreadsheet, FileText, Pencil } from "lucide-react";
 import { useCashflowAuth } from "../../context/CashflowAuthContext";
 import { listMyExpenses, STATUS_LABELS, STATUS_BADGE_CLASSES } from "../../services/expenseService";
 import { downloadExpenseAsXlsx, downloadExpenseAsPdf } from "../../services/expenseExport";
@@ -132,6 +132,11 @@ function MyExpenses() {
                     <StatusBadge status={expense.status} />
                   </Link>
                   <div className="relative" ref={openMenu === expense.id ? menuRef : null}>
+                    {["draft", "pending", "submitted"].includes(String(expense.status || "").toLowerCase()) && (
+                      <Link to={`/cashflow/expense/${expense.id}/edit`} onClick={(e) => e.stopPropagation()} className="mr-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-secondary hover:bg-slate-100" title="Edit claim">
+                        <Pencil className="w-4 h-4" /><span className="sr-only">Edit claim</span>
+                      </Link>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => {

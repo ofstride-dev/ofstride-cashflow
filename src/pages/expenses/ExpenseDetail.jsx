@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { FileText, Paperclip, Download, FileSpreadsheet } from "lucide-react";
+import { FileText, Paperclip, Download, FileSpreadsheet, Pencil } from "lucide-react";
 import { useCashflowAuth } from "../../context/CashflowAuthContext";
 import {
   getExpense,
@@ -109,6 +109,7 @@ function ExpenseDetail() {
     }
   };
 
+  const canEdit = ["draft", "pending", "submitted"].includes(String(expense?.status || "").toLowerCase()) && expense?.user_id === profile?.id;
   if (loading) {
     return (
       <div className="bg-surface flex items-center justify-center py-10">
@@ -162,6 +163,11 @@ function ExpenseDetail() {
                   <Download className="w-4 h-4" />
                   PDF
                 </button>
+                {canEdit && (
+                  <Link to={`/cashflow/expense/${expense.id}/edit`} className="btn-ui btn-ui-sm btn-ui-secondary">
+                    <Pencil className="w-4 h-4" /> Edit
+                  </Link>
+                )}
                 <StatusBadge status={expense.status} />
               </div>
             </div>

@@ -8,6 +8,7 @@ import { Download, FileUp, ShieldCheck } from 'lucide-react';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
+import CollectAmountModal from './CollectAmountModal';
 
 const FIELD_ROWS = [
   ['Vendor Name', 'vendor_name', 'text'],
@@ -40,6 +41,7 @@ export default function AccountsPayable() {
   const [approvingId, setApprovingId] = useState('');
   const [ocrStatus, setOcrStatus] = useState({ type: '', message: '' });
   const [ocrDebugDetail, setOcrDebugDetail] = useState('');
+  const [payBill, setPayBill] = useState(null);
 
   const [formData, setFormData] = useState({
     vendor_name: '',
@@ -221,20 +223,20 @@ export default function AccountsPayable() {
     }
   };
 
-  const handleRecordPayment = async (bill) => {
+  const handleRecordPayment = async (bill, amount) => {
     const gross = Number(bill.amount || 0);
     const balance = Number(bill.balance_due ?? gross);
-    if (balance <= 0) return;
-    const value = window.prompt(`Record vendor payment for ${bill.bill_number}\nEnter amount (Balance due: ₹${balance.toFixed(2)}):`, balance.toFixed(2));
-    if (!value) return;
-    const amount = Number(value);
-    if (!Number.isFinite(amount) || amount <= 0) return;
+    if (balance <= 0) return false;
     try {
       const res = await cashflowFetch('/cashflow/payments/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bill_id: bill.id, amount, payment_mode: 'bank_transfer' }) });
       const parsed = await parseCashflowResponse(res);
-      if (parsed.ok) await fetchInvoices(() => activeIdentityKeyRef.current === authIdentityKey);
-      else console.error('AP payment failed:', parsed.error);
-    } catch (error) { console.error('AP payment failed:', error); }
+      if (parsed.ok) {
+        await fetchInvoices(() => activeIdentityKeyRef.current === authIdentityKey);
+        return true;
+      }
+      console.error('AP payment failed:', parsed.error);
+      return false;
+    } catch (error) { console.error('AP payment failed:', error); return false; }
   };
 
   const handleSaveInvoice=async(e)=>{
@@ -445,7 +447,7 @@ export default function AccountsPayable() {
                         <span className="text-xs text-muted">-</span>
                       )}
                       {Number(inv.balance_due ?? gross) > 0 && (
-                        <button type="button" onClick={() => handleRecordPayment(inv)} className="btn-ui btn-ui-sm btn-ui-info">Pay</button>
+                         <button type="button" onClick={() => setPayBill(inv)} className="btn-ui btn-ui-sm btn-ui-info">Pay</button>
                       )}
                     </td>
                   </tr>
@@ -462,6 +464,17 @@ export default function AccountsPayable() {
           </table>
         )}
       </div>
+      <CollectAmountModal
+        key={payBill?.id || 'ap-pay'}
+        open={Boolean(payBill)}
+        onClose={() => setPayBill(null)}
+        onConfirm={async (amount) => { if (await handleRecordPayment(payBill, amount)) setPayBill(null); }}
+        title="Pay Vendor"
+        documentLabel="Bill"
+        documentNumber={payBill?.bill_number}
+        grossAmount={payBill ? Number(payBill.amount_before_gst || 0) + Number(payBill.gst_amount || 0) : 0}
+        remainingBalance={payBill ? Number(payBill.balance_due ?? payBill.amount ?? 0) : 0}
+      />
     </div>
   );
 }

@@ -79,6 +79,8 @@ function App() {
           <Route path="/expenses/submit" element={<SubmitExpense />} />
           <Route path="/expenses/:id" element={<ExpenseDetail />} />
           <Route path="/cashflow/expense/:id" element={<ExpenseDetail />} />
+          <Route path="/expenses/:id/edit" element={<SubmitExpense />} />
+          <Route path="/cashflow/expense/:id/edit" element={<SubmitExpense />} />
           <Route path="/expenses/admin" element={<AdminExpenseQueue />} />
           <Route path="/cashflow/expense/admin" element={<AdminExpenseQueue />} />
           <Route path="/expenses/admin/invites" element={<AdminInvites />} />
