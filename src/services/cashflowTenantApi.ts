@@ -91,6 +91,7 @@ export async function createCompanyInvite(email: string, role: "admin" | "employ
     body: JSON.stringify({
       email: normalizedEmail,
       invite_token: invite?.invite_token,
+      idempotency_key: `invite:${String(invite?.invite_token || "")}:recipient:v1`,
       company_name: invite?.company_name,
       role: invite?.role || role,
       accept_url: acceptUrl,

@@ -4,7 +4,7 @@
 // has been restyled onto the shared design system.
 
 import { useState, useEffect, useRef } from 'react';
-import { Download, Plus, Trash2 } from 'lucide-react';
+import { Download, FileUp, Plus, Trash2 } from 'lucide-react';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
@@ -41,6 +41,8 @@ export default function AccountsReceivable() {
   const [companyDetails, setCompanyDetails] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState('');
   const [approvingId, setApprovingId] = useState('');
   const [collectInvoice, setCollectInvoice] = useState(null);
   
@@ -120,13 +122,20 @@ export default function AccountsReceivable() {
     </table></div><div class="section"><div class="totals"><div class="summary-row"><span>Gross Amount</span><b>₹${grossBeforeDiscount.toFixed(2)}</b></div><div class="summary-row"><span>Discount (${discountPercent.toFixed(2)}%)</span><b>- ₹${discountAmount.toFixed(2)}</b></div><div class="summary-row"><span>Net Taxable Value</span><b>₹${subtotal.toFixed(2)}</b></div><div class="summary-row"><span>CGST</span><span>₹${cgst.toFixed(2)}</span></div><div class="summary-row"><span>SGST</span><span>₹${sgst.toFixed(2)}</span></div><div class="summary-row"><span>IGST (${gstRate.toFixed(2)}%)</span><span>₹${igst.toFixed(2)}</span></div><div class="summary-row"><span>Total Tax Amount</span><b>₹${tax.toFixed(2)}</b></div><div class="summary-row grand"><span>Total</span><span>₹${total.toFixed(2)}</span></div></div><table class="tax-table"><thead><tr><th>HSN/SAC</th><th>Taxable Value</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total Tax</th></tr></thead><tbody><tr><td>${escapeHtml(invoice?.hsn_sac_code || seller.default_hsn_sac)}</td><td>₹${subtotal.toFixed(2)}</td><td>₹${cgst.toFixed(2)}</td><td>₹${sgst.toFixed(2)}</td><td>₹${igst.toFixed(2)}</td><td>₹${tax.toFixed(2)}</td></tr></tbody></table></div><div class="section footer-grid"><div><b>Amount Chargeable (in words)</b><p>${escapeHtml(amountInWords(total))}</p><b>Tax Amount (in words)</b><p>${escapeHtml(amountInWords(tax))}</p><b>Company's Bank Details</b><p class="muted">Bank: ${escapeHtml(seller.bank_name)}<br>Account Number: ${escapeHtml(seller.bank_account_number)}<br>IFSC Code: ${escapeHtml(seller.bank_ifsc)}</p><p class="declaration"><b>Declaration:</b><br>We declare that this invoice shows the actual price of the goods/services described and that all particulars are true and correct.</p></div><div><b>For ${escapeHtml(sellerName)}</b><div class="sign">Authorised Signatory</div><p class="muted">This is a computer-generated invoice and does not require signature.</p></div></div></div></body>
 </html>`;
 
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${invoice?.invoice_number || 'invoice'}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const printWindow = window.open('', '_blank', 'width=1000,height=800');
+    if (!printWindow) {
+      alert('Please allow pop-ups to download the invoice as a PDF.');
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.document.title = `Invoice ${invoice?.invoice_number || ''}`;
+    printWindow.addEventListener('load', () => {
+      printWindow.focus();
+      printWindow.print();
+    }, { once: true });
   };
 
   useEffect(() => {
@@ -173,6 +182,55 @@ export default function AccountsReceivable() {
       }
     }
     setFormData(next);
+  };
+
+  const handleInvoiceUpload = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/tiff', 'image/bmp'];
+    if (!allowedTypes.includes((file.type || '').toLowerCase())) {
+      setOcrStatus('Unsupported file type. Please upload PDF, JPG, PNG, TIFF, or BMP.');
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      setOcrStatus('File is too large. Please upload a file under 15 MB.');
+      return;
+    }
+    setOcrLoading(true);
+    setOcrStatus('');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const response = await cashflowFetch('/cashflow/ap/ocr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: reader.result }),
+        });
+        const parsed = await parseCashflowResponse(response);
+        if (!parsed.ok) throw new Error(parsed.error || 'Invoice scan failed.');
+        const payload = parsed.data || {};
+        setFormData((previous) => ({
+          ...previous,
+          customer_name: payload.vendor_name || payload.customer_name || previous.customer_name,
+          invoice_number: payload.bill_number || payload.invoice_number || previous.invoice_number,
+          invoice_date: payload.bill_date || payload.invoice_date || previous.invoice_date,
+          amount: payload.amount_before_gst ?? payload.amount ?? previous.amount,
+          gst_amount: payload.gst_amount ?? previous.gst_amount,
+          notes: payload.notes || previous.notes,
+        }));
+        setOcrStatus('Invoice uploaded. Please review the extracted details before creating it.');
+      } catch (error) {
+        setOcrStatus(error instanceof Error ? error.message : 'Invoice scan failed.');
+      } finally {
+        setOcrLoading(false);
+      }
+    };
+    reader.onerror = () => {
+      setOcrLoading(false);
+      setOcrStatus('Could not read the invoice file.');
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleCreateInvoice = async (e) => {
@@ -425,9 +483,17 @@ export default function AccountsReceivable() {
             </button>
           </div>
 
-          <button type="submit" disabled={saving} className="btn-ui btn-ui-primary h-[45px]">
-            {saving ? 'Creating...' : 'Create Invoice'}
-          </button>
+          <div className="col-span-full flex flex-wrap items-center gap-2">
+            <button type="submit" disabled={saving} className="btn-ui btn-ui-primary h-[45px]">
+              {saving ? 'Creating...' : 'Create Invoice'}
+            </button>
+            <label className={`btn-ui btn-ui-neutral h-[45px] cursor-pointer ${ocrLoading ? 'cursor-wait opacity-60' : ''}`}>
+              <FileUp className="h-4 w-4" />
+              {ocrLoading ? 'Scanning...' : 'Upload Invoice'}
+              <input type="file" accept=".pdf,image/*" onChange={handleInvoiceUpload} disabled={ocrLoading} className="sr-only" />
+            </label>
+            {ocrStatus ? <span role="status" className="text-sm font-medium text-muted">{ocrStatus}</span> : null}
+          </div>
         </form>
       </div>
 

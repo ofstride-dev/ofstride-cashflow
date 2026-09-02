@@ -1,6 +1,9 @@
 import os
 import re
 import sys
+import hashlib
+import hmac
+import time
 
 import azure.functions as func
 
@@ -11,8 +14,33 @@ if shared_path not in sys.path:
 
 from email_client import send_email
 from http_utils import error_response, get_trace_id, ok_response, options_response
+from supabase import create_client
+from rate_limit import allow
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MAX_SIGNATURE_AGE_SECONDS = 300
+
+
+def _delivery_client():
+    url = (os.environ.get("SUPABASE_URL") or "").strip()
+    key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or "").strip()
+    return create_client(url, key) if url and key else None
+
+
+def _verify_request(req: func.HttpRequest, body: bytes) -> bool:
+    secret = (os.environ.get("CASHFLOW_INVITE_SHARED_SECRET") or "").encode()
+    timestamp = req.headers.get("x-cashflow-timestamp", "")
+    supplied = req.headers.get("x-cashflow-signature", "")
+    if not secret or not timestamp or not supplied:
+        return False
+    try:
+        timestamp_value = int(timestamp)
+    except ValueError:
+        return False
+    if abs(int(time.time()) - timestamp_value) > MAX_SIGNATURE_AGE_SECONDS:
+        return False
+    expected = hmac.new(secret, f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, supplied)
 
 
 def _support_recipients() -> list[str]:
@@ -43,6 +71,11 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     trace_id = get_trace_id(req)
     if req.method == "OPTIONS":
         return options_response(trace_id=trace_id, req=req)
+    if not _verify_request(req, req.get_body()):
+        return error_response(error_type="auth", message="Request authentication failed.", trace_id=trace_id, req=req, status_code=401)
+    allowed, retry_after = allow("invite")
+    if not allowed:
+        return error_response(error_type="infra", message=f"Too many email requests. Try again in {retry_after} seconds.", trace_id=trace_id, req=req, status_code=429, details={"retry_after": retry_after})
 
     try:
         body = req.get_json()
@@ -66,6 +99,7 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
 
     email = str(body.get("email") or "").strip().lower()
     accept_url = str(body.get("accept_url") or "").strip()
+    idempotency_key = str(body.get("idempotency_key") or "").strip()
     company_name = str(body.get("company_name") or "").strip()
     role = str(body.get("role") or "admin").strip().lower() or "admin"
     sent_by = str(body.get("sent_by") or "Workspace Admin").strip()
@@ -87,6 +121,21 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
             req=req,
             status_code=400,
         )
+    if not idempotency_key:
+        return error_response(error_type="validation", message="idempotency_key is required.", trace_id=trace_id, req=req, status_code=400)
+
+    db = _delivery_client()
+    if not db:
+        return error_response(error_type="infra", message="Email delivery service is not configured.", trace_id=trace_id, req=req, status_code=503)
+    if db:
+        claimed = db.rpc("claim_email_delivery", {"p_idempotency_key": idempotency_key}).execute().data or []
+        existing = db.table("email_deliveries").select("status").eq("idempotency_key", idempotency_key).limit(1).execute().data or []
+        if not existing:
+            return error_response(error_type="validation", message="Unknown email delivery.", trace_id=trace_id, req=req, status_code=409)
+        if existing[0].get("status") == "sent":
+            return ok_response(data={"invite_sent": True, "idempotent": True}, trace_id=trace_id, req=req)
+        if not claimed:
+            return ok_response(data={"invite_sent": True, "delivery_pending": True, "idempotent": True}, trace_id=trace_id, req=req, status_code=202)
 
     try:
         send_email(
@@ -94,7 +143,11 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
             subject=_invite_subject(company_name),
             plain_text=_invite_body(company_name, role, accept_url, sent_by),
         )
+        if db:
+            db.table("email_deliveries").update({"status": "sent", "last_error": None}).eq("idempotency_key", idempotency_key).execute()
     except Exception as exc:
+        if db:
+            db.table("email_deliveries").update({"status": "unknown", "last_error": "provider_send_failed"}).eq("idempotency_key", idempotency_key).execute()
         return error_response(
             error_type="infra",
             message="Failed to send admin invite email.",

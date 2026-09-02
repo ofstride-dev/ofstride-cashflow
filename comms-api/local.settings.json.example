@@ -6,6 +6,11 @@
 
     "ACS_ENDPOINT": "https://acs-ofs-001.india.communication.azure.com",
     "EMAIL_SENDER_ADDRESS": "DoNotReply@eafd51a7-7800-4251-bf8f-a8b754530fc3.azurecomm.net",
+    "CASHFLOW_INVITE_SHARED_SECRET": "replace-with-a-long-random-secret",
+    "SUPABASE_URL": "https://your-project.supabase.co",
+    "SUPABASE_SERVICE_ROLE_KEY": "replace-in-deployment-secrets",
+    "EMAIL_RATE_LIMIT_REQUESTS": "10",
+    "EMAIL_RATE_LIMIT_WINDOW_SECONDS": "60",
     "CAREER_NOTIFY_RECIPIENTS": "ofstride@gmail.com,i@ofstrideservices.com",
     "NOTIFY_RECIPIENTS": "support@ofstrideservices.com,ofstride@gmail.com",
     "CAREERS_NOTIFY_URL": "http://localhost:7072/api/career-notify",

@@ -35,10 +35,10 @@ _rate_limiter = InMemoryRateLimiter()
 
 def get_client_key(forwarded_for: str | None, trace_id: str) -> str:
     if not forwarded_for:
-        return f"anon:{trace_id[:8]}"
+        return "anon"
 
     first = forwarded_for.split(",")[0].strip()
-    return first or f"anon:{trace_id[:8]}"
+    return first or "anon"
 
 
 def enforce_rate_limit(*, route_name: str, client_key: str) -> tuple[bool, int]:

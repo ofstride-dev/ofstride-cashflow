@@ -27,6 +27,35 @@ function CashflowLogin() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState("get-started");
   const [submitting, setSubmitting] = useState(false);
+  const [resendUntil, setResendUntil] = useState(() => Number(window.localStorage.getItem("cashflow-auth-resend-until") || 0));
+  const [now, setNow] = useState(() => Date.now());
+  const [cooldownNotice, setCooldownNotice] = useState("");
+  const resendSeconds = Math.max(0, Math.ceil((resendUntil - now) / 1000));
+
+  useEffect(() => {
+    if (!resendUntil || resendUntil <= Date.now()) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [resendUntil]);
+
+  useEffect(() => {
+    if (resendUntil && resendUntil <= Date.now()) {
+      window.localStorage.removeItem("cashflow-auth-resend-until");
+      setResendUntil(0);
+    }
+  }, [resendUntil, now]);
+
+  const startResendCooldown = () => {
+    const until = Date.now() + 60000;
+    setResendUntil(until);
+    setNow(Date.now());
+    window.localStorage.setItem("cashflow-auth-resend-until", String(until));
+  };
+
+  const showCooldownNotice = () => {
+    setCooldownNotice(`Please try again in ${resendSeconds} seconds.`);
+    window.setTimeout(() => setCooldownNotice(""), 2000);
+  };
 
   const inviteToken = useMemo(() => String(searchParams.get("token") || "").trim(), [searchParams]);
   const inviteEmail = useMemo(() => String(searchParams.get("email") || "").trim(), [searchParams]);
@@ -76,6 +105,10 @@ function CashflowLogin() {
   };
 
   const handleEmailLink = async () => {
+    if (resendSeconds > 0) {
+      showCooldownNotice();
+      return;
+    }
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
       setError("Email is required.");
@@ -92,6 +125,7 @@ function CashflowLogin() {
         return;
       }
       setInfo(`A sign-in link has been sent to ${normalizedEmail}. Open that email on the same device and continue.`);
+      startResendCooldown();
     } finally {
       setSubmitting(false);
     }
@@ -121,6 +155,10 @@ function CashflowLogin() {
   };
 
   const handlePasswordReset = async () => {
+    if (resendSeconds > 0) {
+      showCooldownNotice();
+      return;
+    }
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
       setError("Enter your email address first.");
@@ -136,6 +174,7 @@ function CashflowLogin() {
         return;
       }
       setInfo(`A password setup link has been sent to ${normalizedEmail}. Open it on this device to choose your password.`);
+      startResendCooldown();
     } finally {
       setSubmitting(false);
     }
@@ -157,13 +196,14 @@ function CashflowLogin() {
               <p className="login-inline-subtitle">Unified payables, receivables, expenses & GST — one finance cockpit.</p>
               <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" className="login-inline-input" readOnly={Boolean(inviteToken && inviteEmail)} autoComplete="email" />
               {authMode === "sign-in" && !inviteToken ? <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" className="login-inline-input" autoComplete="current-password" /> : null}
-              <button type="button" onClick={authMode === "sign-in" && !inviteToken ? handlePasswordSignIn : handleEmailLink} disabled={submitting} className="login-inline-submit">{authMode === "sign-in" && !inviteToken ? "Sign In" : "Get Started"}</button>
-              {authMode === "sign-in" && !inviteToken ? <button type="button" onClick={handlePasswordReset} disabled={submitting} className="mt-2 w-full text-center text-sm font-semibold text-blue-700 hover:text-blue-900 disabled:opacity-60">Set up or reset password</button> : null}
+              <button type="button" onClick={authMode === "sign-in" && !inviteToken ? handlePasswordSignIn : handleEmailLink} disabled={submitting} aria-disabled={authMode !== "sign-in" && resendSeconds > 0} className={`login-inline-submit ${authMode !== "sign-in" && resendSeconds > 0 ? "cursor-not-allowed bg-slate-400 opacity-60 hover:bg-slate-400" : ""}`}>{authMode === "sign-in" && !inviteToken ? "Sign In" : "Get Started"}</button>
+              {authMode === "sign-in" && !inviteToken ? <button type="button" onClick={handlePasswordReset} disabled={submitting} aria-disabled={resendSeconds > 0} className={`mt-2 w-full text-center text-sm font-semibold text-blue-700 hover:text-blue-900 disabled:opacity-60 ${resendSeconds > 0 ? "cursor-not-allowed opacity-50" : ""}`}>Set up or reset password</button> : null}
               {!inviteToken ? <button type="button" onClick={() => { setError(""); setInfo(""); setAuthMode((current) => current === "sign-in" ? "get-started" : "sign-in"); }} className="login-inline-switch">{authMode === "sign-in" ? "New user? Get started" : "Existing user? Sign in"}</button> : null}
               <div className="login-inline-divider"><span />OR<span /></div>
               <button type="button" onClick={handleGoogleSignIn} className="login-inline-google"><GoogleIcon className="h-4 w-4" /> Sign up with Google</button>
               {error ? <div className="login-inline-error">{error}</div> : null}
-              {info ? <div className="login-inline-success">{info}</div> : null}
+              {cooldownNotice ? <div role="status" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm font-bold text-amber-800">{cooldownNotice}</div> : null}
+              {info ? <div role="status" className="login-inline-success mt-3 rounded-2xl border-2 border-emerald-300 bg-emerald-50 px-5 py-5 text-base font-bold leading-relaxed text-emerald-800 shadow-sm sm:text-lg">{info}</div> : null}
               <p className="login-inline-foot">OFSTRIDE SERVICES · No credit card needed.</p>
             </div>
             </div>
@@ -259,7 +299,8 @@ function CashflowLogin() {
                   type="button"
                   onClick={authMode === "sign-in" && !inviteToken ? handlePasswordSignIn : handleEmailLink}
                   disabled={submitting}
-                  className="h-12 w-full rounded-xl bg-slate-900 px-6 text-base font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                  aria-disabled={authMode !== "sign-in" && resendSeconds > 0}
+                  className={`h-12 w-full rounded-xl bg-slate-900 px-6 text-base font-semibold text-white hover:bg-slate-800 disabled:opacity-60 ${authMode !== "sign-in" && resendSeconds > 0 ? "cursor-not-allowed bg-slate-400 opacity-60 hover:bg-slate-400" : ""}`}
                 >
                   {authMode === "sign-in" && !inviteToken ? "Sign In" : "Get Started"}
                 </button>
@@ -268,7 +309,8 @@ function CashflowLogin() {
                     type="button"
                     onClick={handlePasswordReset}
                     disabled={submitting}
-                    className="text-sm font-semibold text-blue-700 hover:text-blue-900 disabled:opacity-60"
+                    aria-disabled={resendSeconds > 0}
+                    className={`text-sm font-semibold text-blue-700 hover:text-blue-900 disabled:opacity-60 ${resendSeconds > 0 ? "cursor-not-allowed opacity-50" : ""}`}
                   >
                     Forgot or set password?
                   </button>
@@ -299,7 +341,8 @@ function CashflowLogin() {
             <button
               type="button"
               onClick={handleGoogleSignIn}
-              className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white text-base font-medium text-slate-900 shadow-sm hover:bg-slate-50"
+              disabled={submitting}
+              className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white text-base font-medium text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-60"
             >
               <GoogleIcon className="h-5 w-5" />
               Sign up with Google
@@ -316,7 +359,7 @@ function CashflowLogin() {
               </div>
             ) : null}
             {info ? (
-              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              <div role="status" className="mt-3 rounded-2xl border-2 border-emerald-300 bg-emerald-50 px-5 py-5 text-base font-bold leading-relaxed text-emerald-800 shadow-sm sm:text-lg">
                 {info}
               </div>
             ) : null}

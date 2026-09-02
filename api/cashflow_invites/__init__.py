@@ -1,11 +1,16 @@
 import json
 import os
+import hashlib
+import hmac
+import time
 from urllib import error as url_error
 from urllib import request as url_request
 
 import azure.functions as func
 
 from shared.admin_auth import identity_can_approve, require_cashflow_tenant
+from shared.db import get_supabase_client
+from shared.security.rate_limiter import enforce_rate_limit, get_client_key
 
 
 def _response(status_code: int, ok: bool, data=None, error: str | None = None) -> func.HttpResponse:
@@ -14,10 +19,14 @@ def _response(status_code: int, ok: bool, data=None, error: str | None = None) -
 
 
 def _post_json(target: str, payload: dict) -> tuple[bool, str | None]:
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    timestamp = str(int(time.time()))
+    secret = (os.getenv("CASHFLOW_INVITE_SHARED_SECRET") or "").encode()
+    signature = hmac.new(secret, f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
     req = url_request.Request(
         target,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        data=body,
+        headers={"Content-Type": "application/json", "X-Cashflow-Timestamp": timestamp, "X-Cashflow-Signature": signature},
         method="POST",
     )
     try:
@@ -38,6 +47,12 @@ def _post_json(target: str, payload: dict) -> tuple[bool, str | None]:
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
+    allowed, retry_after = enforce_rate_limit(
+        route_name="cashflow_invite_notify",
+        client_key=get_client_key(req.headers.get("x-forwarded-for"), req.headers.get("x-trace-id", "")),
+    )
+    if not allowed:
+        return _response(429, False, error=f"Too many requests. Try again in {retry_after} seconds.")
     action = (req.route_params.get("action") or "notify").strip().lower()
     if req.method != "POST" or action != "notify":
         return _response(404, False, error="Unsupported cashflow invite action")
@@ -63,6 +78,17 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
     if not email or not invite_token or not accept_url:
         return _response(400, False, error="email, invite_token, and accept_url are required")
+    idempotency_key = f"invite:{invite_token}:recipient:v1"
+    try:
+        get_supabase_client().table("email_deliveries").upsert({
+            "company_id": auth["tenant"].company_id,
+            "operation": "invite",
+            "idempotency_key": idempotency_key,
+            "recipient_addresses": [email],
+            "payload": {"email": email, "invite_token": invite_token, "accept_url": accept_url, "company_name": company_name, "role": role},
+        }, on_conflict="idempotency_key", ignore_duplicates=True).execute()
+    except Exception:
+        return _response(503, False, error="Email delivery could not be queued")
 
     target = (
         (os.getenv("CASHFLOW_INVITE_NOTIFY_URL") or "").strip()
@@ -73,6 +99,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         target,
         {
             "email": email,
+            "idempotency_key": idempotency_key,
             "company_name": company_name,
             "role": role,
             "accept_url": accept_url,
