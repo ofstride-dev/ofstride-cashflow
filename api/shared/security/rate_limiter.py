@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 
-from core.settings import get_settings
+from shared.core.settings import get_settings
 
 
 class InMemoryRateLimiter:
