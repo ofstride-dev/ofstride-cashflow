@@ -64,7 +64,11 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         if not parent.data:
             return create_response(404, False, error="Payment parent resource not found.")
         existing = client.table("cashflow_transactions").select("amount").eq("company_id", context.company_id).eq("invoice_id" if invoice_id else "bill_id", resource_id).execute()
-        gross = float(parent.data[0].get("amount") or 0) + float(parent.data[0].get("gst_amount") or 0)
+        # AR stores net amount and GST separately; AP stores amount as the
+        # already-gross bill value, so GST must not be added twice for bills.
+        gross = float(parent.data[0].get("amount") or 0)
+        if resource_type == "invoice":
+            gross += float(parent.data[0].get("gst_amount") or 0)
         already_paid = sum(float(row.get("amount") or 0) for row in (existing.data or []))
         if amount > max(gross - already_paid, 0):
             return create_response(400, False, error="Payment amount cannot exceed the remaining balance due.")

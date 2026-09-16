@@ -4,14 +4,24 @@
 // restyled onto the shared design system.
 
 import { useState, useEffect, useRef } from 'react';
-import { Download, FileUp, ShieldCheck } from 'lucide-react';
+import { Download, FileUp, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
 import CollectAmountModal from './CollectAmountModal';
+import { parseInvoiceSpreadsheet } from '../../services/invoiceDocumentParser';
+
+const GST_SERVICE_RATES = [
+  { value: '0', label: 'GST-exempt service (0%)' },
+  { value: '5', label: 'Restaurant / transport service (5%)' },
+  { value: '12', label: 'Specified service (12%)' },
+  { value: '18', label: 'Professional / business service (18%)' },
+  { value: '28', label: 'Luxury / specified service (28%)' },
+];
 
 const FIELD_ROWS = [
   ['Vendor Name', 'vendor_name', 'text'],
+  ['Vendor GSTIN', 'vendor_gstin', 'text'],
   ['Invoice #', 'bill_number', 'text'],
   ['Invoice Date', 'bill_date', 'date'],
   ['Payment Terms (Days)', 'payment_terms_days', 'number'],
@@ -19,6 +29,16 @@ const FIELD_ROWS = [
   ['GST Total', 'gst_amount', 'number'],
   ['Gross Total (Net + GST)', 'total_amount', 'number'],
 ];
+
+const emptyLineItem = { itemName: '', description: '', unitPrice: 0, quantity: 1, discount: 0, lineTotal: 0 };
+
+const calculateLineTotal = (item) => {
+  const subtotal = Number(item.unitPrice || 0) * Number(item.quantity || 0);
+  const discount = Math.min(100, Math.max(0, Number(item.discount || 0)));
+  return Number((subtotal - (subtotal * discount / 100)).toFixed(3));
+};
+
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
 
 function TableSkeleton() {
   return (
@@ -42,18 +62,37 @@ export default function AccountsPayable() {
   const [ocrStatus, setOcrStatus] = useState({ type: '', message: '' });
   const [ocrDebugDetail, setOcrDebugDetail] = useState('');
   const [payBill, setPayBill] = useState(null);
+  const [lineItems, setLineItems] = useState([{ ...emptyLineItem }]);
+  const subTotal = Number(lineItems.reduce((total, item) => total + Number(item.lineTotal || 0), 0).toFixed(3));
 
   const [formData, setFormData] = useState({
     vendor_name: '',
+    vendor_gstin: '',
+    vendor_address: '',
     bill_number: '',
     bill_date: '',
     payment_terms_days: '30',
     amount_before_gst: '',
     gst_amount: '',
+    gst_mode: 'percentage',
     gst_rate: '',
     total_amount: '',
     tds_section: 'NONE'
   });
+
+  useEffect(() => {
+    setFormData((previous) => {
+      const gstAmount = previous.gst_rate !== ''
+        ? Number((subTotal * Number(previous.gst_rate || 0) / 100).toFixed(3))
+        : Number(previous.gst_amount || 0);
+      return {
+        ...previous,
+        amount_before_gst: subTotal.toFixed(3),
+        gst_amount: gstAmount.toFixed(3),
+        total_amount: (subTotal + gstAmount).toFixed(3),
+      };
+    });
+  }, [subTotal, formData.gst_rate]);
 
   useEffect(() => {
     let isCurrent = true;
@@ -102,13 +141,15 @@ export default function AccountsPayable() {
       'image/png',
       'image/tiff',
       'image/bmp',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ];
     const maxBytes = 15 * 1024 * 1024;
 
     if (!allowedTypes.includes((file.type || '').toLowerCase())) {
       setOcrStatus({
         type: 'warning',
-        message: 'Unsupported file type. Please upload PDF, JPG, PNG, TIFF, or BMP.',
+        message: 'Unsupported file type. Please upload PDF, Excel, JPG, PNG, TIFF, or BMP.',
       });
       setOcrDebugDetail(`Detected type: ${file.type || 'unknown'}`);
       return;
@@ -126,6 +167,20 @@ export default function AccountsPayable() {
     setOcrLoading(true);
     setOcrStatus({ type: '', message: '' });
     setOcrDebugDetail('');
+    if (['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes((file.type || '').toLowerCase()) || /\.(xlsx|xls)$/i.test(file.name)) {
+      parseInvoiceSpreadsheet(file).then((payload) => {
+        setLineItems(payload.parsedLineItems?.length ? payload.parsedLineItems : [{ ...emptyLineItem }]);
+        setFormData((previous) => ({
+          ...previous,
+          vendor_name: payload.vendor_name || previous.vendor_name,
+          vendor_gstin: payload.vendor_gstin || previous.vendor_gstin,
+          bill_number: payload.bill_number || previous.bill_number,
+          bill_date: payload.bill_date || previous.bill_date,
+        }));
+        setOcrStatus({ type: 'success', message: 'Excel invoice uploaded. Please review the extracted details.' });
+      }).catch((error) => setOcrStatus({ type: 'error', message: error instanceof Error ? error.message : 'Could not read the Excel invoice.' })).finally(() => setOcrLoading(false));
+      return;
+    }
     const requestIdentityKey = authIdentityKey;
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -152,6 +207,7 @@ export default function AccountsPayable() {
             gst_amount: payload.gst_amount || 0,
             total_amount: payload.total_amount ?? (payload.amount || 0),
           };
+          setLineItems(payload.parsedLineItems?.length ? payload.parsedLineItems : [{ ...emptyLineItem }]);
           setFormData(p=>({...p,...nextValues}));
 
           if (scanStatus === 'warning') {
@@ -183,22 +239,17 @@ export default function AccountsPayable() {
     const { name, value } = e.target;
     setFormData((prev) => {
       const next = { ...prev, [name]: value };
-      const base = Number(next.amount_before_gst || 0);
-      const gst = Number(next.gst_amount || 0);
-      const total = Number(next.total_amount || 0);
-
-      if (name === 'amount_before_gst' || name === 'gst_rate') {
-        const rate = Number(next.gst_rate || 0);
-        next.gst_amount = base > 0 ? (base * rate / 100).toFixed(2) : '';
-        next.total_amount = String(Math.max(base + Number(next.gst_amount || 0), 0));
-      } else if (name === 'gst_amount') {
-        next.total_amount = String(Math.max(base + gst, 0));
-      } else if (name === 'total_amount' && next.gst_amount !== '') {
-        next.amount_before_gst = String(Math.max(total - gst, 0));
-      }
 
       return next;
     });
+  };
+
+  const updateLineItem = (index, field, value) => {
+    setLineItems((previousItems) => previousItems.map((item, itemIndex) => {
+      if (itemIndex !== index) return item;
+      const updated = { ...item, [field]: field === 'itemName' || field === 'description' ? value : Number(value || 0) };
+      return { ...updated, lineTotal: calculateLineTotal(updated) };
+    }));
   };
 
   const handleApproveBill = async (billId) => {
@@ -214,7 +265,7 @@ export default function AccountsPayable() {
       const parsed = await parseCashflowResponse(res);
       if (activeIdentityKeyRef.current !== requestIdentityKey) return;
       if (parsed.ok && parsed.data) {
-        setInvoices((prev) => prev.map((bill) => (bill.id === billId ? parsed.data : bill)));
+        await fetchInvoices(() => activeIdentityKeyRef.current === requestIdentityKey);
       } else {
         console.error('AP approve failed:', parsed.error);
       }
@@ -249,13 +300,16 @@ export default function AccountsPayable() {
         body:JSON.stringify({
           ...formData,
           amount: formData.total_amount,
+          line_items: lineItems,
+          party_details: { vendor_name: formData.vendor_name, vendor_gstin: formData.vendor_gstin, vendor_address: formData.vendor_address || '' },
         })
       });
       const parsed = await parseCashflowResponse(res);
       if (activeIdentityKeyRef.current !== requestIdentityKey) return;
       if(parsed.ok){
         setInvoices((previousInvoices) => [parsed.data, ...previousInvoices]);
-        setFormData({vendor_name:'',bill_number:'',bill_date:'',payment_terms_days:'30',amount_before_gst:'',gst_amount:'',gst_rate:'',total_amount:'',tds_section:'NONE'});
+        setFormData({vendor_name:'',vendor_gstin:'',vendor_address:'',bill_number:'',bill_date:'',payment_terms_days:'30',amount_before_gst:'',gst_amount:'',gst_mode:'percentage',gst_rate:'',total_amount:'',tds_section:'NONE'});
+        setLineItems([{ ...emptyLineItem }]);
       } else {
         const msg = String(parsed.error || 'Unable to save bill.');
         console.error('AP save failed:', msg);
@@ -277,8 +331,13 @@ export default function AccountsPayable() {
       const tds = Number(inv.tds_amount || 0);
       const vendor = inv.cashflow_entities?.name || 'N/A';
 
-      return {
+      const items = Array.isArray(inv.line_items) && inv.line_items.length
+        ? inv.line_items
+        : [];
+      return items.length ? items.map((item) => ({
         vendor,
+        vendor_gstin: inv.cashflow_entities?.gstin || inv.party_details?.vendor_gstin || '',
+        vendor_address: inv.party_details?.vendor_address || '',
         bill_number: inv.bill_number || '',
         bill_date: inv.bill_date || '',
         due_date: inv.due_date || '',
@@ -289,13 +348,25 @@ export default function AccountsPayable() {
         tds_amount: tds.toFixed(2),
         net_amount: netBeforeGst.toFixed(2),
         status: inv.status || '',
-      };
-    });
+        item_name: item.itemName || '',
+        description: item.description || '',
+        quantity: item.quantity ?? '',
+        unit_price: item.unitPrice ?? '',
+        line_total: item.lineTotal ?? '',
+      })) : [{
+        vendor,
+        vendor_gstin: inv.cashflow_entities?.gstin || inv.party_details?.vendor_gstin || '',
+        vendor_address: inv.party_details?.vendor_address || '',
+        bill_number: inv.bill_number || '', bill_date: inv.bill_date || '', due_date: inv.due_date || '', payment_terms_days: inv.payment_terms_days ?? '', balance_due: Number(inv.balance_due || 0).toFixed(2), gross_amount: gross.toFixed(2), gst_amount: gst.toFixed(2), tds_amount: tds.toFixed(2), net_amount: netBeforeGst.toFixed(2), status: inv.status || '', item_name: '', description: '', quantity: '', unit_price: '', line_total: ''
+      }];
+    }).flat();
 
     exportRowsAsCsv(
       `ap_report_${now}.csv`,
       [
         { header: 'Vendor', key: 'vendor' },
+        { header: 'Vendor GSTIN', key: 'vendor_gstin' },
+        { header: 'Vendor Address', key: 'vendor_address' },
         { header: 'Bill Number', key: 'bill_number' },
         { header: 'Bill Date', key: 'bill_date' },
         { header: 'Due Date', key: 'due_date' },
@@ -306,9 +377,30 @@ export default function AccountsPayable() {
         { header: 'Net Amount', key: 'net_amount' },
         { header: 'Balance Due', key: 'balance_due' },
         { header: 'Status', key: 'status' },
+        { header: 'Item Name', key: 'item_name' },
+        { header: 'Description', key: 'description' },
+        { header: 'Quantity', key: 'quantity' },
+        { header: 'Unit Price', key: 'unit_price' },
+        { header: 'Line Total', key: 'line_total' },
       ],
       rows
     );
+  };
+
+  const downloadBill = (bill) => {
+    const gst = Number(bill.gst_amount || 0);
+    const gross = Number(bill.amount || 0);
+    const net = Number(bill.amount_before_gst || Math.max(gross - gst, 0));
+    const items = Array.isArray(bill.line_items) && bill.line_items.length
+      ? bill.line_items
+      : [{ itemName: '', description: '', quantity: '', unitPrice: '', lineTotal: net }];
+    const rows = items.map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.itemName || item.description)}</td><td>${escapeHtml(item.quantity)}</td><td>${escapeHtml(item.unitPrice)}</td><td>${Number(item.discount || 0).toFixed(2)}%</td><td>₹${Number(item.lineTotal || 0).toFixed(3)}</td></tr>`).join('');
+    const html = `<!doctype html><html><head><title>Bill ${escapeHtml(bill.bill_number)}</title><style>body{font-family:Arial,sans-serif;color:#172033;padding:28px}h1{margin:0 0 18px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:24px}.party{margin-bottom:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #172033;padding:8px;text-align:left}th{background:#eef2f7}.right{text-align:right}.totals{margin:20px 0 0 auto;width:300px}.total{font-weight:bold;font-size:16px}</style></head><body><h1>TAX BILL</h1><div class="meta"><div><b>Bill No:</b> ${escapeHtml(bill.bill_number)}</div><div><b>Bill Date:</b> ${escapeHtml(bill.bill_date)}</div><div><b>Due Date:</b> ${escapeHtml(bill.due_date)}</div><div><b>Payment Terms:</b> ${escapeHtml(bill.payment_terms_days)} days</div></div><div class="party"><b>Vendor:</b> ${escapeHtml(bill.cashflow_entities?.name || bill.party_details?.vendor_name)}<br><b>GSTIN:</b> ${escapeHtml(bill.cashflow_entities?.gstin || bill.party_details?.vendor_gstin)}<br><b>Address:</b> ${escapeHtml(bill.party_details?.vendor_address)}</div><table><thead><tr><th>Sl. No.</th><th>Particulars</th><th>Quantity</th><th>Rate</th><th>Discount</th><th>Amount (₹)</th></tr></thead><tbody>${rows}</tbody></table><div class="totals"><div>Net Amount: ₹${net.toFixed(3)}</div><div>GST Amount: ₹${gst.toFixed(3)}</div><div class="total">Gross Total: ₹${gross.toFixed(3)}</div></div><script>window.print()</script></body></html>`;
+    const printWindow = window.open('', '_blank', 'width=1000,height=800');
+    if (!printWindow) return;
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   return (
@@ -328,12 +420,12 @@ export default function AccountsPayable() {
         <div className="flex-1 min-w-[280px] rounded-2xl border-2 border-dashed border-slate-200 bg-white p-8 text-center shadow-card">
           <FileUp className="mx-auto h-8 w-8 text-secondary" aria-hidden="true" />
           <h3 className="mt-3 text-lg font-semibold text-primary">Upload Vendor Invoice</h3>
-          <p className="mt-1 text-sm text-muted">Upload PDF or image. AI extracts everything automatically.</p>
+            <p className="mt-1 text-sm text-muted">Upload PDF, image, or Excel. AI extracts everything automatically.</p>
           <label className="mt-4 inline-block">
             <span className="sr-only">Upload invoice file</span>
             <input
               type="file"
-              accept=".pdf,image/*"
+              accept=".pdf,.xls,.xlsx,image/*"
               onChange={handleFileUpload}
               className="mx-auto block text-sm text-text file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3.5 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-primary-hover"
             />
@@ -374,13 +466,52 @@ export default function AccountsPayable() {
                   name={name}
                   value={formData[name]}
                   onChange={handleInputChange}
-                  className="input-ui h-12"
+                  readOnly={['amount_before_gst', 'gst_amount', 'total_amount'].includes(name)}
+                  className={`input-ui h-12 ${['amount_before_gst', 'gst_amount', 'total_amount'].includes(name) ? 'bg-slate-50' : ''}`}
                 />
               </div>
             ))}
             <div>
+              <label className="label-ui" htmlFor="ap-vendor_address">Vendor Address</label>
+              <input id="ap-vendor_address" type="text" name="vendor_address" value={formData.vendor_address} onChange={handleInputChange} placeholder="Optional" className="input-ui h-12" />
+            </div>
+            <div className="col-span-full">
+              <label className="label-ui">Invoice Line Items</label>
+              <div className="hidden items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-muted md:grid md:grid-cols-[1.2fr_1.5fr_0.8fr_0.6fr_0.8fr_0.9fr_auto]">
+                <span>Item Name</span><span>Description</span><span>Price (₹)</span><span>Qty</span><span>Discount (%)</span><span>Total</span><span aria-hidden="true" />
+              </div>
+              <div className="grid gap-2">
+                {lineItems.map((item, index) => (
+                  <div key={`ap-line-item-${index}`} className="grid items-end gap-2 md:grid-cols-[1.2fr_1.5fr_0.8fr_0.6fr_0.8fr_0.9fr_auto]">
+                    <input type="text" value={item.itemName} onChange={(e) => updateLineItem(index, 'itemName', e.target.value)} placeholder="Item name" className="input-ui" />
+                    <input type="text" value={item.description} onChange={(e) => updateLineItem(index, 'description', e.target.value)} placeholder="Description" className="input-ui" />
+                    <input type="number" min="0" step="0.001" value={item.unitPrice || ''} onChange={(e) => updateLineItem(index, 'unitPrice', e.target.value)} placeholder="Price" className="input-ui" />
+                    <input type="number" min="0" step="0.001" value={item.quantity || ''} onChange={(e) => updateLineItem(index, 'quantity', e.target.value)} placeholder="Qty" className="input-ui" />
+                    <input type="number" min="0" max="100" step="0.01" value={item.discount || ''} onChange={(e) => updateLineItem(index, 'discount', e.target.value)} placeholder="Discount %" className="input-ui" />
+                    <input type="number" value={item.lineTotal} readOnly placeholder="Total" className="input-ui bg-slate-50" />
+                    {lineItems.length > 1 && <button type="button" onClick={() => setLineItems((previous) => previous.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove item ${index + 1}`} className="btn-ui btn-ui-sm btn-ui-danger shrink-0"><Trash2 className="h-3.5 w-3.5" /></button>}
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={() => setLineItems((previous) => [...previous, { ...emptyLineItem }])} className="btn-ui btn-ui-sm btn-ui-neutral mt-2.5"><Plus className="h-3.5 w-3.5" />Add Another Item</button>
+              <div className="mt-4 border-t border-slate-200 pt-3 text-right text-base font-bold text-primary">Subtotal: ₹{subTotal.toFixed(3)}</div>
+            </div>
+            <div>
+              <label className="label-ui" htmlFor="ap-gst_mode">GST Calculation</label>
+              <select id="ap-gst_mode" name="gst_mode" value={formData.gst_mode} onChange={handleInputChange} className="input-ui h-12">
+                <option value="percentage">Enter GST percentage</option>
+                <option value="service">Select service category</option>
+              </select>
+            </div>
+            <div>
               <label className="label-ui" htmlFor="ap-gst_rate">GST Rate (%)</label>
-              <input id="ap-gst_rate" type="number" name="gst_rate" min="0" max="100" step="0.01" value={formData.gst_rate} onChange={handleInputChange} placeholder="Optional" className="input-ui h-12" />
+              {formData.gst_mode === 'service' ? (
+                <select id="ap-gst_rate" name="gst_rate" value={formData.gst_rate} onChange={handleInputChange} className="input-ui h-12">
+                  {GST_SERVICE_RATES.map((rate) => <option key={rate.value} value={rate.value}>{rate.label}</option>)}
+                </select>
+              ) : (
+                <input id="ap-gst_rate" type="number" name="gst_rate" min="0" max="100" step="0.01" value={formData.gst_rate} onChange={handleInputChange} placeholder="Optional" className="input-ui h-12" />
+              )}
               <p className="mt-1 text-xs text-muted">GST is calculated on the amount before GST.</p>
             </div>
             <div>
@@ -434,6 +565,9 @@ export default function AccountsPayable() {
                        <span className={`badge-ui ${inv.status === 'paid' || Number(inv.balance_due ?? gross) <= 0 ? 'badge-ui-success' : inv.aging_category === 'Overdue' ? 'badge-ui-danger' : inv.aging_category === 'Due Soon' ? 'badge-ui-warning' : 'badge-ui-success'}`}>{inv.status === 'paid' || Number(inv.balance_due ?? gross) <= 0 ? 'Paid' : (inv.aging_label || inv.status)}</span>
                     </td>
                     <td className="sticky right-0 bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,.35)]">
+                      <button type="button" onClick={() => downloadBill(inv)} aria-label={`Download bill ${inv.bill_number || inv.id}`} className="btn-ui btn-ui-sm btn-ui-info">
+                        <Download className="h-3.5 w-3.5" />
+                      </button>
                       {pending && isAdmin ? (
                         <button
                           type="button"

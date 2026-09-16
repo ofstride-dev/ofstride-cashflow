@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom";
 import { UploadCloud, ChevronDown, Trash2 } from "lucide-react";
 import { useCashflowAuth } from "../../context/CashflowAuthContext";
 import { createExpense, getExpense, updateExpenseClaim, deleteExpense, EXPENSE_CATEGORIES } from "../../services/expenseService";
-import { uploadReceipt } from "../../services/attachmentService";
+import { extractReceiptData, uploadReceipt } from "../../services/attachmentService";
 
 const MAX_RECEIPT_SIZE = 10 * 1024 * 1024; // 10 MB before compression
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
@@ -112,15 +112,15 @@ function SubmitExpense() {
       setSubmitError("Your session has expired. Please sign in again.");
       return;
     }
-    if (!formData.amount || Number(formData.amount) <= 0) {
+    if (!formData.amount && !receiptFile) {
       setSubmitError("Please enter a valid amount.");
       return;
     }
-    if (!formData.spend_date) {
+    if (!formData.spend_date && !receiptFile) {
       setSubmitError("Please select the spend date.");
       return;
     }
-    if (!formData.description.trim()) {
+    if (!formData.description.trim() && !receiptFile) {
       setSubmitError("Please add a short description for this expense.");
       return;
     }
@@ -134,26 +134,34 @@ function SubmitExpense() {
     try {
       setSubmitting(true);
 
+      const receiptData = receiptFile ? await extractReceiptData(receiptFile) : {};
+      const amount = Number(formData.amount || receiptData.amount || 0);
+      const spendDate = formData.spend_date || receiptData.bill_date || "";
+      const description = formData.description.trim() || receiptData.vendor_name || "Receipt expense";
+      if (amount <= 0 || !spendDate) {
+        throw new Error("Azure Document Intelligence could not extract a valid amount and date from the receipt.");
+      }
+
       const payload = {
         user_id: user.id,
         company_id: companyId,
-        amount: Number(formData.amount),
+        amount,
         currency: "INR",
-        spend_date: formData.spend_date,
+        spend_date: spendDate,
         category: formData.category,
-        description: formData.description.trim(),
+        description,
         client_project: formData.client_project.trim() || null,
         has_invoice: formData.has_invoice,
       };
 
       // Only include GST/invoice fields when the user said they have an invoice.
       if (formData.has_invoice) {
-        payload.supplier_gstin = formData.supplier_gstin.trim() || null;
-        payload.invoice_number = formData.invoice_number.trim() || null;
-        payload.taxable_value = formData.taxable_value ? Number(formData.taxable_value) : null;
+        payload.supplier_gstin = formData.supplier_gstin.trim() || receiptData.vendor_gstin || null;
+        payload.invoice_number = formData.invoice_number.trim() || receiptData.bill_number || null;
+        payload.taxable_value = formData.taxable_value ? Number(formData.taxable_value) : Number(receiptData.amount_before_gst || 0) || null;
         payload.cgst = formData.cgst ? Number(formData.cgst) : null;
         payload.sgst = formData.sgst ? Number(formData.sgst) : null;
-        payload.igst = formData.igst ? Number(formData.igst) : null;
+        payload.igst = formData.igst ? Number(formData.igst) : Number(receiptData.gst_amount || 0) || null;
       } else {
         payload.supplier_gstin = null;
         payload.invoice_number = null;

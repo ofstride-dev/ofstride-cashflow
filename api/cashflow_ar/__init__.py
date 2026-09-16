@@ -70,6 +70,12 @@ def _insert_invoice_with_fallback(supabase, invoice_payload: dict):
         # Backward-compatible fallback for deployments where optional columns are missing.
         if "column" in message and ("does not exist" in message or "not found" in message):
             fallback_payload = dict(invoice_payload)
+            if "line_items" in message:
+                fallback_payload.pop("line_items", None)
+                return _insert_invoice_with_fallback(supabase, fallback_payload)
+            if "party_details" in message:
+                fallback_payload.pop("party_details", None)
+                return _insert_invoice_with_fallback(supabase, fallback_payload)
             if "item_services" in message:
                 fallback_payload.pop("item_services", None)
                 try:
@@ -149,6 +155,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
             customer_id = repository.get_or_create_customer(context, data.get("customer_name"), data.get("customer_gstin"))
             item_services = _normalize_item_services(data.get("item_services"))
+            line_items = data.get("line_items") if isinstance(data.get("line_items"), list) else []
+            party_details = data.get("party_details") if isinstance(data.get("party_details"), dict) else {}
 
             amount = _to_float(data.get("amount"), 0.0)
             discount_percent = max(0.0, min(100.0, _to_float(data.get("discount_percent"), 0.0)))
@@ -176,6 +184,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 "created_by": identity.get("user_id"),
                 "notes": _compose_notes(data.get("notes", ""), item_services),
                 "item_services": item_services,
+                "line_items": line_items,
+                "party_details": party_details,
             }
 
             try:

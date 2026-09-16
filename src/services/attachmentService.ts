@@ -1,8 +1,29 @@
 import { supabase } from "./supabase";
+import { cashflowFetch, parseCashflowResponse } from "./cashflowApi";
 
 const MAX_IMAGE_DIMENSION = 1600;
 const TARGET_MAX_BYTES = 250 * 1024;
 const SIGNED_URL_EXPIRY_SECONDS = 60 * 60 * 24; // 24 hours
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read the receipt file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function extractReceiptData(file: File) {
+  const response = await cashflowFetch("/cashflow/ap/ocr", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file: await readFileAsDataUrl(file) }),
+  });
+  const parsed = await parseCashflowResponse(response);
+  if (!parsed.ok) throw new Error(parsed.error || "Receipt OCR failed.");
+  return parsed.data || {};
+}
 
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {

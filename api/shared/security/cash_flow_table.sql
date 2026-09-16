@@ -100,6 +100,18 @@ ALTER TABLE public.cashflow_invoices
 ALTER TABLE public.cashflow_invoices
     ADD COLUMN IF NOT EXISTS invoice_raised_by TEXT;
 
+ALTER TABLE public.cashflow_invoices
+    ADD COLUMN IF NOT EXISTS line_items JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE public.cashflow_invoices
+    ADD COLUMN IF NOT EXISTS party_details JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE public.cashflow_bills
+    ADD COLUMN IF NOT EXISTS line_items JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE public.cashflow_bills
+    ADD COLUMN IF NOT EXISTS party_details JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 -- 5. PAYMENTS & COLLECTIONS
 CREATE TABLE IF NOT EXISTS public.cashflow_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

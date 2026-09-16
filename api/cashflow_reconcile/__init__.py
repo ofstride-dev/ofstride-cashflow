@@ -250,8 +250,9 @@ def _parse_file(name: str, data: bytes) -> tuple[list[dict[str, Any]], list[str]
     if ext == ".csv": return _parse_csv(data)
     if ext in {".xlsx", ".xls"}: return _parse_excel(data, ext)
     if ext == ".pdf":
-        rows, warnings = _parse_pdf_text(data)
-        return (rows, warnings) if rows else _parse_ocr(data, ext)
+        # Route PDFs through Document Intelligence so scanned and irregular
+        # bank statements use the same layout-aware extraction path.
+        return _parse_ocr(data, ext)
     return _parse_ocr(data, ext)
 
 

@@ -10,6 +10,7 @@ import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
 import { supabase } from '../../services/supabase';
 import CollectAmountModal from './CollectAmountModal';
+import { parseInvoiceSpreadsheet } from '../../services/invoiceDocumentParser';
 
 const GST_SERVICE_RATES = [
   { value: '0', label: 'GST-exempt service (0%)' },
@@ -18,6 +19,27 @@ const GST_SERVICE_RATES = [
   { value: '18', label: 'Professional / business service (18%)' },
   { value: '28', label: 'Luxury / specified service (28%)' },
 ];
+
+const emptyLineItem = {
+  itemName: '',
+  description: '',
+  unitPrice: 0,
+  quantity: 1,
+  discount: 0,
+  lineTotal: 0,
+};
+
+const calculateLineTotal = (unitPrice, quantity, discountPercent) => {
+  const lineSubtotal = Number(unitPrice || 0) * Number(quantity || 0);
+  const discount = Math.min(100, Math.max(0, Number(discountPercent || 0)));
+  return Number((lineSubtotal - (lineSubtotal * discount / 100)).toFixed(3));
+};
+
+const calculateGlobalDiscountAmount = (subtotal, discountValue, discountMode = 'percentage') => {
+  const discount = Math.max(0, Number(discountValue || 0));
+  if (discountMode === 'flat') return Math.min(subtotal, discount);
+  return subtotal * Math.min(100, discount) / 100;
+};
 
 function TableSkeleton() {
   return (
@@ -45,12 +67,32 @@ export default function AccountsReceivable() {
   const [ocrStatus, setOcrStatus] = useState('');
   const [approvingId, setApprovingId] = useState('');
   const [collectInvoice, setCollectInvoice] = useState(null);
+  const [lineItems, setLineItems] = useState([{ ...emptyLineItem }]);
+  const subTotal = Number(lineItems.reduce((total, item) => total + Number(item.lineTotal || 0), 0).toFixed(3));
   
   const [formData, setFormData] = useState({
-    customer_name: '', customer_gstin: '', invoice_number: '', invoice_raised_by: '', discount_percent: '',
+    customer_name: '', customer_gstin: '', customer_address: '', invoice_number: '', invoice_raised_by: '', discount_percent: '',
     invoice_date: new Date().toISOString().split('T')[0], 
     due_date: '', amount: '', gst_amount: '', gst_mode: 'percentage', gst_rate: '18', irn_number: '', notes: '', item_services: ['']
   });
+
+  const grossTotal = Number((subTotal + Number(formData.gst_amount || 0)).toFixed(3));
+
+  useEffect(() => {
+    const globalDiscountAmount = calculateGlobalDiscountAmount(
+      subTotal,
+      formData.discount_percent,
+      formData.discount_mode
+    );
+    const taxableAmount = Math.max(0, subTotal - globalDiscountAmount);
+    const gstAmount = taxableAmount * (Math.max(0, Number(formData.gst_rate || 0)) / 100);
+
+    setFormData((previous) => ({
+      ...previous,
+      amount: subTotal.toFixed(3),
+      gst_amount: gstAmount.toFixed(3),
+    }));
+  }, [subTotal, formData.discount_percent, formData.discount_mode, formData.gst_rate]);
 
   useEffect(() => {
     if (!profile?.company_id) return;
@@ -81,6 +123,17 @@ export default function AccountsReceivable() {
     return parseItemsFromNotes(invoice?.notes);
   };
 
+  const getInvoiceLineItems = (invoice) => {
+    if (Array.isArray(invoice?.line_items) && invoice.line_items.length) return invoice.line_items;
+    return getInvoiceItems(invoice).map((item) => ({
+      itemName: item,
+      description: item,
+      quantity: invoice?.quantity || '',
+      unitPrice: invoice?.unit_rate || '',
+      lineTotal: '',
+    }));
+  };
+
   const downloadInvoice = (invoice) => {
     const discountPercent = Math.min(100, Math.max(0, Number(invoice?.discount_percent || 0)));
     // AR persists `amount` as the post-discount taxable value. Reconstruct the
@@ -92,8 +145,9 @@ export default function AccountsReceivable() {
     const discountAmount = Math.max(0, grossBeforeDiscount - subtotal);
     const gst = Number(invoice?.gst_amount || 0);
     const total = subtotal + gst;
-    const items = getInvoiceItems(invoice);
+    const items = getInvoiceLineItems(invoice);
     const customer = invoice?.cashflow_entities?.name || '';
+    const customerDetails = invoice?.party_details || {};
     const seller = companyDetails;
     const sellerName = seller.legal_name || seller.name || profile?.company_name || '';
     const tax = gst;
@@ -111,13 +165,13 @@ export default function AccountsReceivable() {
   </head>
   <body><div class="invoice">
     <div class="header"><div><h2>${escapeHtml(sellerName)}</h2><div class="muted">${escapeHtml(seller.billing_address)}</div><div>${escapeHtml(seller.phone)}</div><div>GSTIN: ${escapeHtml(seller.gstin)}</div><div>PAN: ${escapeHtml(seller.pan)}</div></div><div class="meta"><h1>TAX INVOICE</h1><div><b>Invoice No.</b><span>${escapeHtml(invoice?.invoice_number)}</span></div><div><b>Dated</b><span>${escapeHtml(invoice?.invoice_date)}</span></div><div><b>Due Date</b><span>${escapeHtml(invoice?.due_date)}</span></div><div><b>IRN</b><span>${escapeHtml(invoice?.irn_number)}</span></div></div></div>
-    <div class="section parties"><div class="party"><b>Buyer (Bill to):</b><h2>${escapeHtml(customer)}</h2><div>Address: ${escapeHtml(invoice?.customer_address)}</div><div>GSTIN/UIN: ${escapeHtml(invoice?.cashflow_entities?.gstin)}</div><div>PAN/IT No: ${escapeHtml(invoice?.customer_pan)}</div></div><div class="party"><b>Place of Supply</b><div>State: ${escapeHtml(invoice?.place_of_supply_state)}</div><div>State Code: ${escapeHtml(invoice?.place_of_supply_code)}</div><br><b>Terms of Payment</b><div>${escapeHtml(invoice?.payment_terms || 'As agreed')}</div></div></div>
+    <div class="section parties"><div class="party"><b>Buyer (Bill to):</b><h2>${escapeHtml(customerDetails.customer_name || customer)}</h2><div>Address: ${escapeHtml(customerDetails.customer_address || invoice?.customer_address)}</div><div>GSTIN/UIN: ${escapeHtml(customerDetails.customer_gstin || invoice?.cashflow_entities?.gstin)}</div><div>PAN/IT No: ${escapeHtml(invoice?.customer_pan)}</div></div><div class="party"><b>Place of Supply</b><div>State: ${escapeHtml(invoice?.place_of_supply_state)}</div><div>State Code: ${escapeHtml(invoice?.place_of_supply_code)}</div><br><b>Terms of Payment</b><div>${escapeHtml(invoice?.payment_terms || 'As agreed')}</div></div></div>
     <div class="section"><table>
       <thead>
         <tr><th>Sl. No.</th><th>Particulars</th><th>HSN/SAC</th><th>Quantity</th><th class="right">Rate</th><th class="right">Amount (₹)</th></tr>
       </thead>
       <tbody>
-        ${(items.length ? items : ['']).map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item)}</td><td>${escapeHtml(invoice?.hsn_sac_code || seller.default_hsn_sac)}</td><td>${escapeHtml(invoice?.quantity || '')}</td><td class="right">${escapeHtml(invoice?.unit_rate || '')}</td><td class="right">${index === 0 ? `₹${grossBeforeDiscount.toFixed(2)}` : ''}</td></tr>`).join('')}
+        ${(items.length ? items : [{}]).map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.itemName || item.description)}</td><td>${escapeHtml(invoice?.hsn_sac_code || seller.default_hsn_sac)}</td><td>${escapeHtml(item.quantity)}</td><td class="right">${escapeHtml(item.unitPrice)}</td><td class="right">${item.lineTotal !== '' && item.lineTotal !== undefined ? `₹${Number(item.lineTotal).toFixed(3)}` : (index === 0 ? `₹${grossBeforeDiscount.toFixed(3)}` : '')}</td></tr>`).join('')}
       </tbody>
     </table></div><div class="section"><div class="totals"><div class="summary-row"><span>Gross Amount</span><b>₹${grossBeforeDiscount.toFixed(2)}</b></div><div class="summary-row"><span>Discount (${discountPercent.toFixed(2)}%)</span><b>- ₹${discountAmount.toFixed(2)}</b></div><div class="summary-row"><span>Net Taxable Value</span><b>₹${subtotal.toFixed(2)}</b></div><div class="summary-row"><span>CGST</span><span>₹${cgst.toFixed(2)}</span></div><div class="summary-row"><span>SGST</span><span>₹${sgst.toFixed(2)}</span></div><div class="summary-row"><span>IGST (${gstRate.toFixed(2)}%)</span><span>₹${igst.toFixed(2)}</span></div><div class="summary-row"><span>Total Tax Amount</span><b>₹${tax.toFixed(2)}</b></div><div class="summary-row grand"><span>Total</span><span>₹${total.toFixed(2)}</span></div></div><table class="tax-table"><thead><tr><th>HSN/SAC</th><th>Taxable Value</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total Tax</th></tr></thead><tbody><tr><td>${escapeHtml(invoice?.hsn_sac_code || seller.default_hsn_sac)}</td><td>₹${subtotal.toFixed(2)}</td><td>₹${cgst.toFixed(2)}</td><td>₹${sgst.toFixed(2)}</td><td>₹${igst.toFixed(2)}</td><td>₹${tax.toFixed(2)}</td></tr></tbody></table></div><div class="section footer-grid"><div><b>Amount Chargeable (in words)</b><p>${escapeHtml(amountInWords(total))}</p><b>Tax Amount (in words)</b><p>${escapeHtml(amountInWords(tax))}</p><b>Company's Bank Details</b><p class="muted">Bank: ${escapeHtml(seller.bank_name)}<br>Account Number: ${escapeHtml(seller.bank_account_number)}<br>IFSC Code: ${escapeHtml(seller.bank_ifsc)}</p><p class="declaration"><b>Declaration:</b><br>We declare that this invoice shows the actual price of the goods/services described and that all particulars are true and correct.</p></div><div><b>For ${escapeHtml(sellerName)}</b><div class="sign">Authorised Signatory</div><p class="muted">This is a computer-generated invoice and does not require signature.</p></div></div></div></body>
 </html>`;
@@ -170,27 +224,32 @@ export default function AccountsReceivable() {
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
     const next = { ...formData, [name]: type === 'checkbox' ? checked : value };
-    if (name === 'amount' || name === 'discount_percent' || name === 'gst_rate' || name === 'gst_mode') {
-      const rate = name === 'gst_rate' ? Number(value) : Number(next.gst_rate || 0);
-      const grossAmount = Number(name === 'amount' ? value : next.amount) || 0;
-      const discount = Number(name === 'discount_percent' ? value : next.discount_percent) || 0;
-      const net = grossAmount * Math.max(0, 1 - Math.min(100, discount) / 100);
-      if ((name === 'gst_mode' ? value : next.gst_mode) === 'percentage') {
-        next.gst_amount = net > 0 ? (net * rate / 100).toFixed(2) : '';
-      } else if (name === 'gst_mode') {
-        next.gst_amount = net > 0 ? (net * rate / 100).toFixed(2) : '';
-      }
-    }
     setFormData(next);
+  };
+
+  const updateLineItem = (index, field, value) => {
+    setLineItems((previousItems) => previousItems.map((item, itemIndex) => {
+      if (itemIndex !== index) return item;
+
+      const updatedItem = {
+        ...item,
+        [field]: field === 'itemName' || field === 'description' ? value : Number(value || 0),
+      };
+
+      return {
+        ...updatedItem,
+        lineTotal: calculateLineTotal(updatedItem.unitPrice, updatedItem.quantity, updatedItem.discount),
+      };
+    }));
   };
 
   const handleInvoiceUpload = (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/tiff', 'image/bmp'];
+    const allowedTypes = ['application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'image/jpeg', 'image/jpg', 'image/png', 'image/tiff', 'image/bmp'];
     if (!allowedTypes.includes((file.type || '').toLowerCase())) {
-      setOcrStatus('Unsupported file type. Please upload PDF, JPG, PNG, TIFF, or BMP.');
+      setOcrStatus('Unsupported file type. Please upload PDF, Excel, JPG, PNG, TIFF, or BMP.');
       return;
     }
     if (file.size > 15 * 1024 * 1024) {
@@ -199,6 +258,21 @@ export default function AccountsReceivable() {
     }
     setOcrLoading(true);
     setOcrStatus('');
+    if (['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes((file.type || '').toLowerCase()) || /\.(xlsx|xls)$/i.test(file.name)) {
+      parseInvoiceSpreadsheet(file).then((payload) => {
+        const nextLineItems = payload.parsedLineItems?.length ? payload.parsedLineItems : [{ ...emptyLineItem }];
+        setLineItems(nextLineItems);
+        setFormData((previous) => ({
+          ...previous,
+          customer_name: payload.customer_name || previous.customer_name,
+          customer_gstin: payload.customer_gstin || previous.customer_gstin,
+          invoice_number: payload.invoice_number || previous.invoice_number,
+          invoice_date: payload.invoice_date || previous.invoice_date,
+        }));
+        setOcrStatus('Excel invoice uploaded. Please review the extracted details before creating it.');
+      }).catch((error) => setOcrStatus(error instanceof Error ? error.message : 'Could not read the Excel invoice.')).finally(() => setOcrLoading(false));
+      return;
+    }
     const reader = new FileReader();
     reader.onload = async () => {
       try {
@@ -210,6 +284,23 @@ export default function AccountsReceivable() {
         const parsed = await parseCashflowResponse(response);
         if (!parsed.ok) throw new Error(parsed.error || 'Invoice scan failed.');
         const payload = parsed.data || {};
+        const nextLineItems = Array.isArray(payload.parsedLineItems) && payload.parsedLineItems.length
+          ? payload.parsedLineItems.map((item) => {
+            const unitPrice = Number(Number(item.unitPrice || 0).toFixed(3));
+            const quantity = Number(item.quantity || 1);
+            const discount = Math.min(100, Math.max(0, Number(item.discount || 0)));
+
+            return {
+              itemName: item.itemName || '',
+              description: item.description || '',
+              unitPrice,
+              quantity,
+              discount,
+              lineTotal: calculateLineTotal(unitPrice, quantity, discount),
+            };
+          })
+          : [{ ...emptyLineItem }];
+        setLineItems(nextLineItems);
         setFormData((previous) => ({
           ...previous,
           customer_name: payload.vendor_name || payload.customer_name || previous.customer_name,
@@ -236,7 +327,16 @@ export default function AccountsReceivable() {
   const handleCreateInvoice = async (e) => {
     e.preventDefault();
     const requestIdentityKey = authIdentityKey;
-    const invoicePayload = { ...formData };
+    const invoicePayload = {
+      ...formData,
+      item_services: lineItems.map((item) => item.itemName).filter(Boolean),
+      line_items: lineItems,
+      party_details: {
+        customer_name: formData.customer_name,
+        customer_gstin: formData.customer_gstin,
+        customer_address: formData.customer_address || '',
+      },
+    };
     delete invoicePayload.gst_mode;
     delete invoicePayload.gst_rate;
     setSaving(true);
@@ -251,10 +351,11 @@ export default function AccountsReceivable() {
       if (parsed.ok) {
         setInvoices((previousInvoices) => [parsed.data, ...previousInvoices]);
         setFormData({ 
-            customer_name: '', customer_gstin: '', invoice_number: '', invoice_raised_by: '', discount_percent: '',
+            customer_name: '', customer_gstin: '', customer_address: '', invoice_number: '', invoice_raised_by: '', discount_percent: '',
           invoice_date: new Date().toISOString().split('T')[0], 
             due_date: '', amount: '', gst_amount: '', gst_mode: 'percentage', gst_rate: '18', irn_number: '', notes: '', item_services: ['']
         });
+          setLineItems([{ ...emptyLineItem }]);
       } else {
         throw new Error(parsed.error || `Server error ${parsed.status}`);
       }
@@ -325,9 +426,13 @@ export default function AccountsReceivable() {
       const amount = Number(inv.amount || 0);
       const gst = Number(inv.gst_amount || 0);
       const total = amount + gst;
-      return {
+      const items = Array.isArray(inv.line_items) && inv.line_items.length
+        ? inv.line_items
+        : (inv.item_services || []).map((item) => ({ itemName: item, description: item, quantity: '', unitPrice: '', lineTotal: '' }));
+      return items.map((item) => ({
         customer: inv.cashflow_entities?.name || 'N/A',
         customer_gstin: inv.cashflow_entities?.gstin || '',
+        customer_address: inv.party_details?.customer_address || '',
         invoice_number: inv.invoice_number || '',
         invoice_date: inv.invoice_date || '',
         due_date: inv.due_date || '',
@@ -338,14 +443,20 @@ export default function AccountsReceivable() {
         status: inv.status || '',
         is_proforma: inv.is_proforma ? 'Yes' : 'No',
         irn_number: inv.irn_number || '',
-      };
-    });
+        item_name: item.itemName || '',
+        description: item.description || '',
+        quantity: item.quantity ?? '',
+        unit_price: item.unitPrice ?? '',
+        line_total: item.lineTotal ?? '',
+      }));
+    }).flat();
 
     exportRowsAsCsv(
       `ar_report_${now}.csv`,
       [
         { header: 'Customer', key: 'customer' },
         { header: 'Customer GSTIN', key: 'customer_gstin' },
+        { header: 'Customer Address', key: 'customer_address' },
         { header: 'Invoice Number', key: 'invoice_number' },
         { header: 'Invoice Date', key: 'invoice_date' },
         { header: 'Due Date', key: 'due_date' },
@@ -355,6 +466,11 @@ export default function AccountsReceivable() {
         { header: 'Status', key: 'status' },
         { header: 'Is Proforma', key: 'is_proforma' },
         { header: 'IRN Number', key: 'irn_number' },
+        { header: 'Item Name', key: 'item_name' },
+        { header: 'Description', key: 'description' },
+        { header: 'Quantity', key: 'quantity' },
+        { header: 'Unit Price', key: 'unit_price' },
+        { header: 'Line Total', key: 'line_total' },
       ],
       rows
     );
@@ -394,6 +510,14 @@ export default function AccountsReceivable() {
             <input id="ar-invoice_number" type="text" name="invoice_number" value={formData.invoice_number} onChange={handleInputChange} placeholder="Auto-generated" className="input-ui" />
           </div>
           <div>
+            <label className="label-ui" htmlFor="ar-customer_gstin">Customer GSTIN</label>
+            <input id="ar-customer_gstin" type="text" name="customer_gstin" value={formData.customer_gstin} onChange={handleInputChange} placeholder="Optional" className="input-ui" />
+          </div>
+          <div>
+            <label className="label-ui" htmlFor="ar-customer_address">Customer Address</label>
+            <input id="ar-customer_address" type="text" name="customer_address" value={formData.customer_address} onChange={handleInputChange} placeholder="Optional" className="input-ui" />
+          </div>
+          <div>
             <label className="label-ui" htmlFor="ar-invoice_date">Invoice Date</label>
             <input id="ar-invoice_date" type="date" name="invoice_date" value={formData.invoice_date} onChange={handleInputChange} required className="input-ui" />
           </div>
@@ -403,7 +527,7 @@ export default function AccountsReceivable() {
           </div>
           <div>
             <label className="label-ui" htmlFor="ar-amount">Amount Before Discount (₹)</label>
-            <input id="ar-amount" type="number" name="amount" value={formData.amount} onChange={handleInputChange} required className="input-ui" />
+            <input id="ar-amount" type="number" name="amount" value={formData.amount} readOnly required className="input-ui bg-slate-50" />
           </div>
           <div>
             <label className="label-ui" htmlFor="ar-discount_percent">Discount (%)</label>
@@ -433,6 +557,11 @@ export default function AccountsReceivable() {
             <p id="ar-gst-help" className="mt-1 text-xs text-muted">Calculated on the amount after discount and before GST.</p>
           </div>
           <div>
+            <label className="label-ui" htmlFor="ar-gross_total">Gross Total (₹)</label>
+            <input id="ar-gross_total" type="number" value={grossTotal.toFixed(3)} readOnly className="input-ui bg-slate-50" />
+            <p className="mt-1 text-xs text-muted">Subtotal plus GST.</p>
+          </div>
+          <div>
             <label className="label-ui" htmlFor="ar-irn_number">IRN Number</label>
             <input id="ar-irn_number" type="text" name="irn_number" value={formData.irn_number} onChange={handleInputChange} placeholder="Optional" className="input-ui" />
           </div>
@@ -442,28 +571,73 @@ export default function AccountsReceivable() {
           </div>
 
           <div className="col-span-full">
-            <label className="label-ui">Item / Service</label>
+            <label className="label-ui">Invoice Line Items</label>
+            <div className="hidden items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-muted md:grid md:grid-cols-[1.2fr_1.5fr_0.8fr_0.6fr_0.8fr_0.9fr_auto]">
+              <span>Item Name</span>
+              <span>Description</span>
+              <span>Price (₹)</span>
+              <span>Qty</span>
+              <span>Discount (%)</span>
+              <span>Total</span>
+              <span aria-hidden="true" />
+            </div>
             <div className="grid gap-2">
-              {formData.item_services.map((item, index) => (
-                <div key={`item-${index}`} className="flex items-center gap-2">
+              {lineItems.map((item, index) => (
+                <div key={`line-item-${index}`} className="grid items-end gap-2 md:grid-cols-[1.2fr_1.5fr_0.8fr_0.6fr_0.8fr_0.9fr_auto]">
                   <input
                     type="text"
-                    value={item}
-                    onChange={(e) => {
-                      const nextItems = [...formData.item_services];
-                      nextItems[index] = e.target.value;
-                      setFormData({ ...formData, item_services: nextItems });
-                    }}
-                    placeholder={`Item/Service ${index + 1}`}
+                    value={item.itemName}
+                    onChange={(e) => updateLineItem(index, 'itemName', e.target.value)}
+                    placeholder="Item name"
                     className="input-ui"
                   />
-                  {formData.item_services.length > 1 && (
+                  <input
+                    type="text"
+                    value={item.description}
+                    onChange={(e) => updateLineItem(index, 'description', e.target.value)}
+                    placeholder="Description"
+                    className="input-ui"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={item.unitPrice || ''}
+                    onChange={(e) => updateLineItem(index, 'unitPrice', e.target.value)}
+                    placeholder="Price"
+                    className="input-ui"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value={item.quantity}
+                    onChange={(e) => updateLineItem(index, 'quantity', e.target.value)}
+                    placeholder="Qty"
+                    className="input-ui"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={item.discount || ''}
+                    onChange={(e) => updateLineItem(index, 'discount', e.target.value)}
+                    placeholder="Discount %"
+                    className="input-ui"
+                  />
+                  <input
+                    type="number"
+                    value={item.lineTotal}
+                    readOnly
+                    aria-label={`Line total for item ${index + 1}`}
+                    placeholder="Total"
+                    className="input-ui bg-slate-50"
+                  />
+                  {lineItems.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => {
-                        const nextItems = formData.item_services.filter((_, idx) => idx !== index);
-                        setFormData({ ...formData, item_services: nextItems.length ? nextItems : [''] });
-                      }}
+                      onClick={() => setLineItems((previousItems) => previousItems.filter((_, itemIndex) => itemIndex !== index))}
                       aria-label={`Remove item ${index + 1}`}
                       className="btn-ui btn-ui-sm btn-ui-danger shrink-0"
                     >
@@ -475,12 +649,15 @@ export default function AccountsReceivable() {
             </div>
             <button
               type="button"
-              onClick={() => setFormData({ ...formData, item_services: [...formData.item_services, ''] })}
+              onClick={() => setLineItems((previousItems) => [...previousItems, { ...emptyLineItem }])}
               className="btn-ui btn-ui-sm btn-ui-neutral mt-2.5"
             >
               <Plus className="h-3.5 w-3.5" />
               Add Another Item
             </button>
+            <div className="mt-4 border-t border-slate-200 pt-3 text-right text-base font-bold text-primary">
+              Subtotal: ₹{subTotal.toFixed(3)}
+            </div>
           </div>
 
           <div className="col-span-full flex flex-wrap items-center gap-2">
@@ -490,7 +667,7 @@ export default function AccountsReceivable() {
             <label className={`btn-ui btn-ui-neutral h-[45px] cursor-pointer ${ocrLoading ? 'cursor-wait opacity-60' : ''}`}>
               <FileUp className="h-4 w-4" />
               {ocrLoading ? 'Scanning...' : 'Upload Invoice'}
-              <input type="file" accept=".pdf,image/*" onChange={handleInvoiceUpload} disabled={ocrLoading} className="sr-only" />
+              <input type="file" accept=".pdf,.xls,.xlsx,image/*" onChange={handleInvoiceUpload} disabled={ocrLoading} className="sr-only" />
             </label>
             {ocrStatus ? <span role="status" className="text-sm font-medium text-muted">{ocrStatus}</span> : null}
           </div>

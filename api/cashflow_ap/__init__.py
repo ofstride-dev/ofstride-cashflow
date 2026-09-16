@@ -51,6 +51,52 @@ def _extract_first_amount(fields: dict, keys: list[str]) -> float | None:
     return None
 
 
+def _field_text(field, default: str = "") -> str:
+    value = getattr(field, "value", None) if field is not None else None
+    if value is None:
+        return default
+    return str(value).strip()
+
+
+def _extract_line_items(fields: dict) -> list[dict]:
+    items_field = fields.get("Items") or fields.get("items")
+    raw_items = getattr(items_field, "value", None) if items_field is not None else None
+    if not isinstance(raw_items, list):
+        raw_items = getattr(items_field, "value_array", None) if items_field is not None else None
+    if not isinstance(raw_items, list):
+        return []
+
+    parsed_items = []
+    for item in raw_items:
+        item_fields = getattr(item, "value", None)
+        if not isinstance(item_fields, dict):
+            item_fields = getattr(item, "value_object", None)
+        if not isinstance(item_fields, dict):
+            continue
+
+        description = _field_text(item_fields.get("Description"))
+        quantity = _field_amount(item_fields.get("Quantity"))
+        unit_price = _field_amount(item_fields.get("Price"))
+        total_price = _field_amount(item_fields.get("TotalPrice"))
+        quantity = quantity if quantity is not None and quantity > 0 else 1.0
+        unit_price = unit_price if unit_price is not None else 0.0
+        total_price = total_price if total_price is not None else unit_price * quantity
+
+        if not description and unit_price == 0 and total_price == 0:
+            continue
+
+        parsed_items.append({
+            "itemName": description,
+            "description": description,
+            "unitPrice": round(unit_price, 3),
+            "quantity": round(quantity, 3),
+            "discount": 0.0,
+            "lineTotal": round(total_price, 3),
+        })
+
+    return parsed_items
+
+
 def _extract_gst_from_content(content: str) -> float:
     if not content:
         return 0.0
@@ -125,13 +171,13 @@ def _classify_ocr_error(exc: Exception) -> tuple[str, str]:
 
 
 def _normalize_ap_extracted(extracted: dict) -> dict:
-    amount_before_gst = round(_safe_float(extracted.get("amount_before_gst"), 0.0), 2)
-    gst_amount = round(_safe_float(extracted.get("gst_amount"), 0.0), 2)
-    total_amount = round(_safe_float(extracted.get("total_amount"), _safe_float(extracted.get("amount"), 0.0)), 2)
+    amount_before_gst = round(_safe_float(extracted.get("amount_before_gst"), 0.0), 3)
+    gst_amount = round(_safe_float(extracted.get("gst_amount"), 0.0), 3)
+    total_amount = round(_safe_float(extracted.get("total_amount"), _safe_float(extracted.get("amount"), 0.0)), 3)
     if total_amount <= 0 and (amount_before_gst > 0 or gst_amount > 0):
-        total_amount = round(amount_before_gst + gst_amount, 2)
+        total_amount = round(amount_before_gst + gst_amount, 3)
     if amount_before_gst <= 0 and total_amount > 0:
-        amount_before_gst = round(max(total_amount - gst_amount, 0.0), 2)
+        amount_before_gst = round(max(total_amount - gst_amount, 0.0), 3)
 
     return {
         "vendor_name": str(extracted.get("vendor_name") or "").strip(),
@@ -143,6 +189,7 @@ def _normalize_ap_extracted(extracted: dict) -> dict:
         "total_amount": total_amount,
         # Keep backward-compatible key used by save flow.
         "amount": total_amount,
+        "parsedLineItems": extracted.get("parsedLineItems") if isinstance(extracted.get("parsedLineItems"), list) else [],
     }
 
 
@@ -178,7 +225,7 @@ def _repair_ap_extracted(extracted: dict, ocr_content: str = "") -> dict:
 def _build_ap_extracted_from_doc(fields: dict, ocr_content: str) -> dict:
     total_tax = _extract_first_amount(fields, ["TotalTax", "Tax", "TaxTotal"])
     subtotal = _extract_first_amount(fields, ["SubTotal", "Subtotal"])
-    invoice_total = _extract_first_amount(fields, ["InvoiceTotal", "TotalAmount", "AmountDue"])
+    invoice_total = _extract_first_amount(fields, ["InvoiceTotal", "TotalAmount", "AmountDue", "Total"])
     parsed_tax_from_content = _extract_gst_from_content(ocr_content or "")
 
     if total_tax is None:
@@ -198,24 +245,25 @@ def _build_ap_extracted_from_doc(fields: dict, ocr_content: str) -> dict:
         total_tax = 0.0
 
     extracted = {
-        "vendor_name": (fields.get("VendorName").value if fields.get("VendorName") else "") or "",
+        "vendor_name": _field_text(fields.get("VendorName") or fields.get("MerchantName")),
         "vendor_gstin": (fields.get("VendorTaxId").value if fields.get("VendorTaxId") else "") or "",
-        "bill_number": (fields.get("InvoiceId").value if fields.get("InvoiceId") else "") or "",
-        "bill_date": str(fields.get("InvoiceDate").value) if fields.get("InvoiceDate") else datetime.now().strftime("%Y-%m-%d"),
+        "bill_number": _field_text(fields.get("InvoiceId") or fields.get("ReceiptId")),
+        "bill_date": _field_text(fields.get("InvoiceDate") or fields.get("TransactionDate"), datetime.now().strftime("%Y-%m-%d")),
         "amount_before_gst": round(_safe_float(subtotal, 0.0), 2),
         "total_amount": round(_safe_float(invoice_total, 0.0), 2),
         "amount": round(_safe_float(invoice_total, 0.0), 2),
         "gst_amount": round(_safe_float(total_tax, 0.0), 2),
+        "parsedLineItems": _extract_line_items(fields),
     }
     return _normalize_ap_extracted(extracted)
 
 
-def _run_ap_ocr_pipeline(file_bytes: bytes, endpoint: str, key: str) -> dict:
+def _run_ap_ocr_pipeline(file_bytes: bytes, endpoint: str, key: str, model_id: str = "prebuilt-receipt") -> dict:
     from azure.core.credentials import AzureKeyCredential
     from azure.ai.formrecognizer import DocumentAnalysisClient
 
     client = DocumentAnalysisClient(endpoint=endpoint, credential=AzureKeyCredential(key))
-    poller = client.begin_analyze_document("prebuilt-invoice", document=file_bytes)
+    poller = client.begin_analyze_document(model_id, document=file_bytes)
     ocr_result = poller.result()
     if not ocr_result.documents:
         return {
@@ -371,7 +419,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
             if endpoint and key:
                 try:
-                    pipeline_result = _run_ap_ocr_pipeline(file_bytes, endpoint, key)
+                    model_id = os.environ.get("AZURE_DOC_INTEL_MODEL", "prebuilt-receipt")
+                    pipeline_result = _run_ap_ocr_pipeline(file_bytes, endpoint, key, model_id)
                     extracted = _normalize_ap_extracted(pipeline_result.get("extracted") or {})
                     final_issues = (pipeline_result.get("pipeline") or {}).get("issues") or []
                     if final_issues:
@@ -419,6 +468,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 )
             data = req.get_json()
             vendor_id = APRepository(supabase).get_or_create_vendor(auth["tenant"], data.get("vendor_name"), data.get("vendor_gstin"))
+            line_items = data.get("line_items") if isinstance(data.get("line_items"), list) else []
+            party_details = data.get("party_details") if isinstance(data.get("party_details"), dict) else {}
 
             amount = float(data.get("total_amount", data.get("amount", 0)))
             amount_before_gst = float(data.get("amount_before_gst", max(amount - float(data.get("gst_amount", 0)), 0)))
@@ -450,6 +501,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 "tds_amount": tds_amount,
                 "created_by": identity.get("user_id"),
                 "status": "pending"
+                ,"line_items": line_items
+                ,"party_details": party_details
             }
             
             response = supabase.table('cashflow_bills').insert(new_bill).execute()
