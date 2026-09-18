@@ -343,11 +343,15 @@ export default function AccountsPayable() {
 
   const confirmAdminAction = async ({ reason, comment }) => {
     if (!adminTarget) return;
-    const response = await cashflowFetch(`/cashflow/ap/${adminTarget.action}`, { method: 'POST', body: JSON.stringify({ bill_id: adminTarget.id, reason, comment }) });
-    const parsed = await parseCashflowResponse(response);
-    if (!parsed.ok) throw new Error(parsed.error || `Could not ${adminTarget.action} bill.`);
-    setAdminTarget(null);
-    await fetchInvoices(() => activeIdentityKeyRef.current === authIdentityKey);
+    try {
+      const response = await cashflowFetch(`/cashflow/ap/${adminTarget.action}`, { method: 'POST', body: JSON.stringify({ bill_id: adminTarget.id, reason, comment }) });
+      const parsed = await parseCashflowResponse(response);
+      if (!parsed.ok) throw new Error(parsed.error || `Could not ${adminTarget.action} bill.`);
+      setAdminTarget(null);
+      await fetchInvoices(() => activeIdentityKeyRef.current === authIdentityKey);
+    } catch (error) {
+      setOcrStatus({ type: 'error', message: error instanceof Error ? error.message : 'Could not delete bill.' });
+    }
   };
 
   const handleDownloadReport = () => {

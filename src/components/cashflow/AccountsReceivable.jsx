@@ -388,11 +388,15 @@ export default function AccountsReceivable() {
 
   const confirmAdminAction = async ({ reason, comment }) => {
     if (!adminTarget) return;
-    const response = await cashflowFetch(`/cashflow/ar/${adminTarget.action}`, { method: 'POST', body: JSON.stringify({ invoice_id: adminTarget.id, reason, comment }) });
-    const parsed = await parseCashflowResponse(response);
-    if (!parsed.ok) throw new Error(parsed.error || `Could not ${adminTarget.action} invoice.`);
-    setAdminTarget(null);
-    await fetchInvoices(() => activeIdentityKeyRef.current === authIdentityKey);
+    try {
+      const response = await cashflowFetch(`/cashflow/ar/${adminTarget.action}`, { method: 'POST', body: JSON.stringify({ invoice_id: adminTarget.id, reason, comment }) });
+      const parsed = await parseCashflowResponse(response);
+      if (!parsed.ok) throw new Error(parsed.error || `Could not ${adminTarget.action} invoice.`);
+      setAdminTarget(null);
+      await fetchInvoices(() => activeIdentityKeyRef.current === authIdentityKey);
+    } catch (error) {
+      setOcrStatus(error instanceof Error ? error.message : 'Could not delete invoice.');
+    }
   };
 
   const handleRecordPayment = async (invoice, paymentAmount) => {
