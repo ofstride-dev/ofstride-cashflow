@@ -180,7 +180,7 @@ export async function parseCashflowResponse<T = any>(res: Response): Promise<{
   return {
     ok: false,
     status: res.status,
-    data: null,
+    data: (payload?.data ?? null) as T | null,
     error: String(messageFromPayload || fallback),
   };
 }

@@ -9,6 +9,7 @@ export default function CollectAmountModal({
   grossAmount,
   remainingBalance,
   title = "Collect Payment",
+  paymentAction = "Collect",
 }) {
   const [value, setValue] = useState("");
 
@@ -40,7 +41,7 @@ export default function CollectAmountModal({
         <p className="mt-1 text-sm text-muted">Remaining balance: ₹{remaining.toFixed(2)}</p>
         <form onSubmit={submit} className="mt-5 space-y-4">
           <div>
-            <label htmlFor="collect-amount" className="mb-1 block text-sm font-medium text-primary">Amount to Collect</label>
+            <label htmlFor="collect-amount" className="mb-1 block text-sm font-medium text-primary">Amount to {paymentAction}</label>
             <input
               id="collect-amount"
               type="number"
@@ -59,7 +60,7 @@ export default function CollectAmountModal({
           </div>
           <div className="flex justify-end gap-3">
             <button type="button" onClick={onClose} className="btn-ui btn-ui-neutral">Cancel</button>
-            <button type="submit" disabled={Boolean(error)} className="btn-ui btn-ui-primary">Collect</button>
+            <button type="submit" disabled={Boolean(error)} className="btn-ui btn-ui-primary">{paymentAction}</button>
           </div>
         </form>
       </div>

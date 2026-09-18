@@ -11,6 +11,7 @@ import {
   IndianRupee,
   UserPlus,
   X,
+  RefreshCw,
 } from 'lucide-react';
 import { cashflowFetch } from '../../services/cashflowApi';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { label: 'Payables (AP)', path: '/cashflow/ap', icon: ArrowUpCircle },
   { label: 'Receivables (AR)', path: '/cashflow/ar', icon: ArrowDownCircle },
   { label: 'Bank Reconcile', path: '/cashflow/reconcile', icon: GitCompareArrows },
+  { label: 'Tally Sync', path: '/cashflow/tally-sync', icon: RefreshCw },
   { label: 'Expense Portal', path: '/cashflow/expense', icon: IndianRupee },
 ];
 

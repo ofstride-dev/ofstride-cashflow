@@ -9,6 +9,16 @@ from shared.db import get_supabase_client
 from shared.tax_engine_interface import calculate_tds, calculate_msme_due_date
 from shared.admin_auth import identity_can_approve, identity_can_use_cashflow, require_cashflow_tenant, resolve_identity_headers
 from cashflow.ap import APRepository
+from shared.dedup import document_fingerprint, duplicate_key, normalize_invoice_number
+from shared.tenant import audit, TenantContext
+
+
+def _safe_json(data) -> str:
+    """Serialize AP responses without allowing duplicate details to crash the handler."""
+    try:
+        return json.dumps(data, default=str)
+    except (TypeError, ValueError):
+        return json.dumps({"ok": False, "error": "Response serialization failed"})
 
 
 def _safe_float(value, default: float = 0.0) -> float:
@@ -338,6 +348,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     
     try:
         supabase = get_supabase_client()
+        tenant_context = TenantContext(user_id=str(identity.get("user_id") or ""), company_id=company_id, role=str(identity.get("role") or ""), email=identity.get("email"), full_name=identity.get("full_name"))
 
         def build_mock_extracted(reason: str = "OCR could not extract fields") -> dict:
             # Keep endpoint contract stable when OCR can't infer fields.
@@ -391,6 +402,34 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 return func.HttpResponse(json.dumps({"ok": True, "data": []}), mimetype="application/json")
 
             return func.HttpResponse(json.dumps({"ok": True, "data": response.data}), mimetype="application/json")
+
+        if req.method == "POST" and action in {"update", "delete", "void"}:
+            if not identity_can_approve(identity):
+                return func.HttpResponse(json.dumps({"ok": False, "error": "Only owners, admins, or finance users can modify AP records."}), mimetype="application/json", status_code=403)
+            data = req.get_json()
+            bill_id = str(data.get("bill_id") or "").strip()
+            reason = str(data.get("reason") or "").strip()
+            comment = str(data.get("comment") or "").strip()
+            if not bill_id or not reason or (reason == "Other" and not comment):
+                return func.HttpResponse(json.dumps({"ok": False, "error": "bill_id and a mandatory reason are required."}), mimetype="application/json", status_code=400)
+            current = supabase.table("cashflow_bills").select("*").eq("company_id", company_id).eq("id", bill_id).limit(1).execute().data or []
+            if not current:
+                return func.HttpResponse(json.dumps({"ok": False, "error": "Bill not found."}), mimetype="application/json", status_code=404)
+            record = current[0]
+            if action == "delete":
+                audit.record(supabase, tenant_context, "delete", "cashflow_bill", bill_id, "success", {"reason": reason, "comment": comment, "record": record})
+                supabase.table("cashflow_bills").delete().eq("company_id", company_id).eq("id", bill_id).execute()
+                return func.HttpResponse(json.dumps({"ok": True, "data": {"id": bill_id, "deleted": True}}), mimetype="application/json")
+            if action == "void":
+                updated = supabase.table("cashflow_bills").update({"status": "cancelled"}).eq("company_id", company_id).eq("id", bill_id).execute()
+                audit.record(supabase, tenant_context, "void", "cashflow_bill", bill_id, "success", {"reason": reason, "comment": comment, "record": record})
+                return func.HttpResponse(json.dumps({"ok": True, "data": (updated.data or [record])[0]}), mimetype="application/json")
+            allowed = {key: data[key] for key in ("bill_number", "bill_date", "due_date", "payment_terms_days", "amount", "gst_amount", "tds_amount", "line_items", "party_details") if key in data}
+            if not allowed:
+                return func.HttpResponse(json.dumps({"ok": False, "error": "No editable bill fields were provided."}), mimetype="application/json", status_code=400)
+            updated = supabase.table("cashflow_bills").update(allowed).eq("company_id", company_id).eq("id", bill_id).execute()
+            audit.record(supabase, tenant_context, "edit", "cashflow_bill", bill_id, "success", {"reason": reason, "comment": comment, "changes": allowed})
+            return func.HttpResponse(json.dumps({"ok": True, "data": (updated.data or [record])[0]}), mimetype="application/json")
 
         # 2. POST /api/cashflow/ap/ocr
         elif req.method == "POST" and action == "ocr":
@@ -489,10 +528,56 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 return func.HttpResponse(json.dumps({"ok": False, "error": "payment_terms_days must be a non-negative integer"}), mimetype="application/json", status_code=400)
             due_date = (datetime.strptime(bill_date, "%Y-%m-%d") + timedelta(days=payment_terms_days)).strftime("%Y-%m-%d")
 
+            supplied_bill_number = str(data.get("bill_number") or "").strip()
+            dedup_fingerprint = document_fingerprint(
+                party_id=vendor_id,
+                party_name=data.get("vendor_name"),
+                document_date=bill_date,
+                amount=amount,
+                gst_amount=0,
+                line_items=line_items,
+            )
+            normalized_bill_number, dedup_fingerprint = duplicate_key(supplied_bill_number, dedup_fingerprint)
+            force_save = bool(data.get("force_save"))
+            duplicate_query = supabase.table("cashflow_bills").select("id,bill_number,bill_date,amount,gst_amount,cashflow_entities(name)").eq("company_id", company_id).eq("vendor_id", vendor_id).limit(1)
+            if normalized_bill_number:
+                duplicate_query = duplicate_query.eq("normalized_bill_number", normalized_bill_number)
+            else:
+                duplicate_query = duplicate_query.eq("dedup_fingerprint", dedup_fingerprint)
+            try:
+                duplicate_rows = duplicate_query.execute().data or []
+            except Exception as duplicate_error:
+                # Keep duplicate warnings usable while an older deployment is
+                # waiting for the additive dedup migration.
+                if "column" not in str(duplicate_error).lower():
+                    raise
+                legacy_rows = supabase.table("cashflow_bills").select("id,bill_number,bill_date,amount,gst_amount,cashflow_entities(name)").eq("company_id", company_id).eq("vendor_id", vendor_id).execute().data or []
+                duplicate_rows = [row for row in legacy_rows if (
+                    normalized_bill_number and normalize_invoice_number(row.get("bill_number")) == normalized_bill_number
+                ) or (
+                    not normalized_bill_number and str(row.get("bill_date") or "")[:10] == str(bill_date)[:10] and round(float(row.get("amount") or 0), 2) == round(amount, 2)
+                )]
+            if duplicate_rows and not force_save:
+                existing = duplicate_rows[0]
+                return func.HttpResponse(_safe_json({
+                    "ok": False,
+                    "duplicate": True,
+                    "error": "Potential duplicate detected.",
+                    "data": {"existing": existing, "kind": "bill"},
+                }), mimetype="application/json", status_code=409)
+
+            bill_number = supplied_bill_number or f"BILL-{int(datetime.now().timestamp())}"
+            if force_save:
+                bill_number = f"{bill_number}-DUP-{int(datetime.now().timestamp())}"
+                dedup_fingerprint = f"{dedup_fingerprint}-override-{identity.get('user_id')}-{int(datetime.now().timestamp())}"
+
             new_bill = {
                 "company_id": company_id,
                 "vendor_id": vendor_id,
-                "bill_number": data.get("bill_number", f"BILL-{int(datetime.now().timestamp())}"),
+                "bill_number": bill_number,
+                "normalized_bill_number": normalized_bill_number,
+                "dedup_fingerprint": dedup_fingerprint,
+                "dedup_override": force_save,
                 "bill_date": bill_date,
                 "due_date": due_date,
                 "payment_terms_days": payment_terms_days,
@@ -505,7 +590,15 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 ,"party_details": party_details
             }
             
-            response = supabase.table('cashflow_bills').insert(new_bill).execute()
+            try:
+                response = supabase.table('cashflow_bills').insert(new_bill).execute()
+            except Exception as insert_error:
+                if "23505" in str(insert_error) or "duplicate key value" in str(insert_error).lower():
+                    raced = supabase.table("cashflow_bills").select("id,bill_number,bill_date,amount,gst_amount,cashflow_entities(name)").eq("company_id", company_id).eq("dedup_fingerprint", dedup_fingerprint).limit(1).execute().data or []
+                    if raced and not force_save:
+                        return func.HttpResponse(_safe_json({"ok": False, "duplicate": True, "error": "Potential duplicate detected.", "data": {"existing": raced[0], "kind": "bill"}}), mimetype="application/json", status_code=409)
+                raise
+            audit.record(supabase, tenant_context, "upload", "cashflow_bill", response.data[0].get("id") if response.data else None, "success", {"source": "ap", "bill_number": bill_number, "force_save": force_save})
             
             # Re-query with vendor relationship
             bill_with_vendor = (

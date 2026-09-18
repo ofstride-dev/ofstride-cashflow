@@ -66,6 +66,10 @@ CREATE TABLE IF NOT EXISTS public.cashflow_bills (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE public.cashflow_bills ADD COLUMN IF NOT EXISTS normalized_bill_number TEXT;
+ALTER TABLE public.cashflow_bills ADD COLUMN IF NOT EXISTS dedup_fingerprint TEXT;
+ALTER TABLE public.cashflow_bills ADD COLUMN IF NOT EXISTS dedup_override BOOLEAN NOT NULL DEFAULT FALSE;
+
 ALTER TABLE public.cashflow_bills
     ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER NOT NULL DEFAULT 30;
 
@@ -85,6 +89,10 @@ CREATE TABLE IF NOT EXISTS public.cashflow_invoices (
     created_by UUID REFERENCES auth.users(id),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.cashflow_invoices ADD COLUMN IF NOT EXISTS normalized_invoice_number TEXT;
+ALTER TABLE public.cashflow_invoices ADD COLUMN IF NOT EXISTS dedup_fingerprint TEXT;
+ALTER TABLE public.cashflow_invoices ADD COLUMN IF NOT EXISTS dedup_override BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- 4B. AR ENHANCEMENTS (idempotent)
 -- Supports multi-item invoice input from frontend and optional freeform notes.

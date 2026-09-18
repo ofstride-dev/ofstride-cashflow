@@ -4,12 +4,14 @@
 // restyled onto the shared design system.
 
 import { useState, useEffect, useRef } from 'react';
-import { Download, FileUp, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Download, Edit2, FileUp, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
 import CollectAmountModal from './CollectAmountModal';
 import { parseInvoiceSpreadsheet } from '../../services/invoiceDocumentParser';
+import DuplicateDocumentModal from './DuplicateDocumentModal';
+import AdminMutationModal from './AdminMutationModal';
 
 const GST_SERVICE_RATES = [
   { value: '0', label: 'GST-exempt service (0%)' },
@@ -62,6 +64,9 @@ export default function AccountsPayable() {
   const [ocrStatus, setOcrStatus] = useState({ type: '', message: '' });
   const [ocrDebugDetail, setOcrDebugDetail] = useState('');
   const [payBill, setPayBill] = useState(null);
+  const [duplicateCandidate, setDuplicateCandidate] = useState(null);
+  const [adminTarget, setAdminTarget] = useState(null);
+  const [editingId, setEditingId] = useState('');
   const [lineItems, setLineItems] = useState([{ ...emptyLineItem }]);
   const subTotal = Number(lineItems.reduce((total, item) => total + Number(item.lineTotal || 0), 0).toFixed(3));
 
@@ -200,12 +205,15 @@ export default function AccountsPayable() {
           const scanDetail = String(payload._scan_error_detail || '').trim();
           const nextValues = {
             vendor_name: payload.vendor_name || '',
+            vendor_gstin: payload.vendor_gstin || '',
+            vendor_address: payload.vendor_address || '',
             bill_number: payload.bill_number || '',
             bill_date: payload.bill_date || '',
             payment_terms_days: payload.payment_terms_days ?? '30',
             amount_before_gst: payload.amount_before_gst ?? Math.max((Number(payload.amount || 0) - Number(payload.gst_amount || 0)), 0),
             gst_amount: payload.gst_amount || 0,
             total_amount: payload.total_amount ?? (payload.amount || 0),
+            amount: payload.total_amount ?? (payload.amount || 0),
           };
           setLineItems(payload.parsedLineItems?.length ? payload.parsedLineItems : [{ ...emptyLineItem }]);
           setFormData(p=>({...p,...nextValues}));
@@ -290,15 +298,16 @@ export default function AccountsPayable() {
     } catch (error) { console.error('AP payment failed:', error); return false; }
   };
 
-  const handleSaveInvoice=async(e)=>{
+  const handleSaveInvoice=async(e, forceSave = false)=>{
     e.preventDefault();
     const requestIdentityKey = authIdentityKey;
     try {
-      const res=await cashflowFetch('/cashflow/ap/save',{
+      const res=await cashflowFetch(editingId ? '/cashflow/ap/update' : '/cashflow/ap/save',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
           ...formData,
+          ...(editingId ? { bill_id: editingId, reason: 'Manual edit', comment: 'Edited from Accounts Payable' } : { force_save: forceSave }),
           amount: formData.total_amount,
           line_items: lineItems,
           party_details: { vendor_name: formData.vendor_name, vendor_gstin: formData.vendor_gstin, vendor_address: formData.vendor_address || '' },
@@ -307,16 +316,38 @@ export default function AccountsPayable() {
       const parsed = await parseCashflowResponse(res);
       if (activeIdentityKeyRef.current !== requestIdentityKey) return;
       if(parsed.ok){
-        setInvoices((previousInvoices) => [parsed.data, ...previousInvoices]);
+        setInvoices((previousInvoices) => editingId ? previousInvoices.map((item) => item.id === editingId ? parsed.data : item) : [parsed.data, ...previousInvoices]);
+        setEditingId('');
         setFormData({vendor_name:'',vendor_gstin:'',vendor_address:'',bill_number:'',bill_date:'',payment_terms_days:'30',amount_before_gst:'',gst_amount:'',gst_mode:'percentage',gst_rate:'',total_amount:'',tds_section:'NONE'});
         setLineItems([{ ...emptyLineItem }]);
       } else {
         const msg = String(parsed.error || 'Unable to save bill.');
+        if (parsed.status === 409 && parsed.data?.existing) {
+          setDuplicateCandidate({ ...parsed.data, partyName: formData.vendor_name });
+          return;
+        }
+        setOcrStatus({ type: 'error', message: msg });
         console.error('AP save failed:', msg);
       }
     } catch (error) {
       console.error('AP save failed:', error instanceof Error ? error.message : 'Unable to save bill.');
     }
+  };
+
+  const startEditBill = (bill) => {
+    setEditingId(bill.id);
+    setFormData((previous) => ({ ...previous, vendor_name: bill.cashflow_entities?.name || bill.party_details?.vendor_name || '', vendor_gstin: bill.cashflow_entities?.gstin || bill.party_details?.vendor_gstin || '', bill_number: bill.bill_number || '', bill_date: bill.bill_date || '', payment_terms_days: String(bill.payment_terms_days ?? 30), amount_before_gst: String(bill.amount_before_gst ?? Math.max(Number(bill.amount || 0) - Number(bill.gst_amount || 0), 0)), gst_amount: String(bill.gst_amount || 0), total_amount: String(bill.amount || 0) }));
+    setLineItems(Array.isArray(bill.line_items) && bill.line_items.length ? bill.line_items : [{ ...emptyLineItem }]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const confirmAdminAction = async ({ reason, comment }) => {
+    if (!adminTarget) return;
+    const response = await cashflowFetch(`/cashflow/ap/${adminTarget.action}`, { method: 'POST', body: JSON.stringify({ bill_id: adminTarget.id, reason, comment }) });
+    const parsed = await parseCashflowResponse(response);
+    if (!parsed.ok) throw new Error(parsed.error || `Could not ${adminTarget.action} bill.`);
+    setAdminTarget(null);
+    await fetchInvoices(() => activeIdentityKeyRef.current === authIdentityKey);
   };
 
   const handleDownloadReport = () => {
@@ -525,6 +556,7 @@ export default function AccountsPayable() {
               </select>
             </div>
 
+            <div className="col-span-full rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950">Confirm every vendor, invoice number, date, tax field, line item, and total before saving this bill.</div>
             <button type="submit" className="btn-ui btn-ui-primary col-span-full h-12">
               <ShieldCheck className="h-4 w-4" />
               Approve &amp; Save Bill
@@ -533,7 +565,7 @@ export default function AccountsPayable() {
         </div>
       </div>
 
-      <div className="scroll-ui overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
+      <div id="ap-bill-list" className="scroll-ui overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
         {loading ? (
           <TableSkeleton />
         ) : (
@@ -565,9 +597,10 @@ export default function AccountsPayable() {
                        <span className={`badge-ui ${inv.status === 'paid' || Number(inv.balance_due ?? gross) <= 0 ? 'badge-ui-success' : inv.aging_category === 'Overdue' ? 'badge-ui-danger' : inv.aging_category === 'Due Soon' ? 'badge-ui-warning' : 'badge-ui-success'}`}>{inv.status === 'paid' || Number(inv.balance_due ?? gross) <= 0 ? 'Paid' : (inv.aging_label || inv.status)}</span>
                     </td>
                     <td className="sticky right-0 bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,.35)]">
-                      <button type="button" onClick={() => downloadBill(inv)} aria-label={`Download bill ${inv.bill_number || inv.id}`} className="btn-ui btn-ui-sm btn-ui-info">
+                      <button type="button" onClick={() => downloadBill(inv)} aria-label={`Download bill ${inv.bill_number || inv.id}`} title="Download bill" className="btn-ui btn-ui-sm btn-ui-info">
                         <Download className="h-3.5 w-3.5" />
                       </button>
+                      {isAdmin && <><button type="button" onClick={() => startEditBill(inv)} aria-label="Edit bill" title="Edit bill" className="btn-ui btn-ui-sm btn-ui-secondary"><Edit2 className="h-3.5 w-3.5" /></button><button type="button" onClick={() => setAdminTarget({ id: inv.id, action: 'delete' })} aria-label="Delete bill" title="Delete bill" className="btn-ui btn-ui-sm btn-ui-danger"><Trash2 className="h-3.5 w-3.5" /></button></>}
                       {pending && isAdmin ? (
                         <button
                           type="button"
@@ -580,7 +613,7 @@ export default function AccountsPayable() {
                       ) : (
                         <span className="text-xs text-muted">-</span>
                       )}
-                      {Number(inv.balance_due ?? gross) > 0 && (
+                       {['approved', 'overdue'].includes(String(inv.status || '').toLowerCase()) && Number(inv.balance_due ?? gross) > 0 && (
                          <button type="button" onClick={() => setPayBill(inv)} className="btn-ui btn-ui-sm btn-ui-info">Pay</button>
                       )}
                     </td>
@@ -604,11 +637,25 @@ export default function AccountsPayable() {
         onClose={() => setPayBill(null)}
         onConfirm={async (amount) => { if (await handleRecordPayment(payBill, amount)) setPayBill(null); }}
         title="Pay Vendor"
+        paymentAction="Pay"
         documentLabel="Bill"
         documentNumber={payBill?.bill_number}
-        grossAmount={payBill ? Number(payBill.amount_before_gst || 0) + Number(payBill.gst_amount || 0) : 0}
+        grossAmount={payBill ? Number(payBill.amount || 0) : 0}
         remainingBalance={payBill ? Number(payBill.balance_due ?? payBill.amount ?? 0) : 0}
       />
+      <DuplicateDocumentModal
+        duplicate={duplicateCandidate}
+        onClose={() => setDuplicateCandidate(null)}
+        onViewExisting={() => {
+          setDuplicateCandidate(null);
+          document.getElementById('ap-bill-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }}
+        onForceSave={async () => {
+          setDuplicateCandidate(null);
+          await handleSaveInvoice({ preventDefault() {} }, true);
+        }}
+      />
+      <AdminMutationModal action={adminTarget?.action} documentLabel="Bill" onClose={() => setAdminTarget(null)} onConfirm={confirmAdminAction} />
     </div>
   );
 }

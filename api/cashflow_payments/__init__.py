@@ -63,6 +63,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             return create_response(500, False, error="Cashflow payment tables are not configured.")
         if not parent.data:
             return create_response(404, False, error="Payment parent resource not found.")
+        parent_status = str(parent.data[0].get("status") or "").lower()
+        if parent_status not in {"approved", "overdue"}:
+            return create_response(409, False, error="The bill or invoice must be approved before a payment can be recorded.")
         existing = client.table("cashflow_transactions").select("amount").eq("company_id", context.company_id).eq("invoice_id" if invoice_id else "bill_id", resource_id).execute()
         # AR stores net amount and GST separately; AP stores amount as the
         # already-gross bill value, so GST must not be added twice for bills.

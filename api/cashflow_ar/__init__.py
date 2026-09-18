@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from shared.db import get_supabase_client
 from shared.admin_auth import identity_can_approve, require_cashflow_tenant
 from cashflow.ar import ARRepository, MissingTableError
+from shared.dedup import document_fingerprint, duplicate_key, normalize_invoice_number
+from shared.tenant import audit, TenantContext
 
 
 def _to_float(value, default: float = 0.0) -> float:
@@ -135,6 +137,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json",
                 status_code=403,
             )
+        tenant_context = TenantContext(user_id=str(identity.get("user_id") or ""), company_id=company_id, role=str(identity.get("role") or ""), email=identity.get("email"), full_name=identity.get("full_name"))
 
         # 1. GET /api/cashflow/ar/list -> Fetch all outbound invoices
         if req.method == "GET" and action == "list":
@@ -145,6 +148,29 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 raise
 
             return func.HttpResponse(_safe_json({"ok": True, "data": response.data}), mimetype="application/json")
+
+        if req.method == "POST" and action in {"update", "delete", "void"}:
+            if not identity_can_approve(identity):
+                return func.HttpResponse(_safe_json({"ok": False, "error": "Only owners, admins, or finance users can modify AR records."}), mimetype="application/json", status_code=403)
+            data = req.get_json(); invoice_id = str(data.get("invoice_id") or "").strip(); reason = str(data.get("reason") or "").strip(); comment = str(data.get("comment") or "").strip()
+            if not invoice_id or not reason or (reason == "Other" and not comment):
+                return func.HttpResponse(_safe_json({"ok": False, "error": "invoice_id and a mandatory reason are required."}), mimetype="application/json", status_code=400)
+            current = supabase.table("cashflow_invoices").select("*").eq("company_id", company_id).eq("id", invoice_id).limit(1).execute().data or []
+            if not current: return func.HttpResponse(_safe_json({"ok": False, "error": "Invoice not found."}), mimetype="application/json", status_code=404)
+            record = current[0]
+            if action == "delete":
+                audit.record(supabase, tenant_context, "delete", "cashflow_invoice", invoice_id, "success", {"reason": reason, "comment": comment, "record": record})
+                supabase.table("cashflow_invoices").delete().eq("company_id", company_id).eq("id", invoice_id).execute()
+                return func.HttpResponse(_safe_json({"ok": True, "data": {"id": invoice_id, "deleted": True}}), mimetype="application/json")
+            if action == "void":
+                updated = supabase.table("cashflow_invoices").update({"status": "cancelled"}).eq("company_id", company_id).eq("id", invoice_id).execute()
+                audit.record(supabase, tenant_context, "void", "cashflow_invoice", invoice_id, "success", {"reason": reason, "comment": comment, "record": record})
+                return func.HttpResponse(_safe_json({"ok": True, "data": (updated.data or [record])[0]}), mimetype="application/json")
+            allowed = {key: data[key] for key in ("invoice_number", "invoice_date", "due_date", "amount", "gst_amount", "discount_percent", "notes", "line_items", "party_details") if key in data}
+            if not allowed: return func.HttpResponse(_safe_json({"ok": False, "error": "No editable invoice fields were provided."}), mimetype="application/json", status_code=400)
+            updated = supabase.table("cashflow_invoices").update(allowed).eq("company_id", company_id).eq("id", invoice_id).execute()
+            audit.record(supabase, tenant_context, "edit", "cashflow_invoice", invoice_id, "success", {"reason": reason, "comment": comment, "changes": allowed})
+            return func.HttpResponse(_safe_json({"ok": True, "data": (updated.data or [record])[0]}), mimetype="application/json")
 
         # 2. POST /api/cashflow/ar/create -> Create a new sales invoice
         elif req.method == "POST" and action == "create":
@@ -168,10 +194,54 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             # Default due date to 15 days if not specified
             due_date = data.get("due_date") or (datetime.strptime(invoice_date, "%Y-%m-%d") + timedelta(days=15)).strftime("%Y-%m-%d")
 
+            supplied_invoice_number = str(data.get("invoice_number") or "").strip()
+            dedup_fingerprint = document_fingerprint(
+                party_id=customer_id,
+                party_name=data.get("customer_name"),
+                document_date=invoice_date,
+                amount=taxable_amount,
+                gst_amount=gst_amount,
+                line_items=line_items,
+            )
+            normalized_invoice_number, dedup_fingerprint = duplicate_key(supplied_invoice_number, dedup_fingerprint)
+            force_save = bool(data.get("force_save"))
+            duplicate_query = supabase.table("cashflow_invoices").select("id,invoice_number,invoice_date,amount,gst_amount,cashflow_entities(name)").eq("company_id", company_id).eq("customer_id", customer_id).limit(1)
+            if normalized_invoice_number:
+                duplicate_query = duplicate_query.eq("normalized_invoice_number", normalized_invoice_number)
+            else:
+                duplicate_query = duplicate_query.eq("dedup_fingerprint", dedup_fingerprint)
+            try:
+                duplicate_rows = duplicate_query.execute().data or []
+            except Exception as duplicate_error:
+                if "column" not in str(duplicate_error).lower():
+                    raise
+                legacy_rows = supabase.table("cashflow_invoices").select("id,invoice_number,invoice_date,amount,gst_amount,cashflow_entities(name)").eq("company_id", company_id).eq("customer_id", customer_id).execute().data or []
+                duplicate_rows = [row for row in legacy_rows if (
+                    normalized_invoice_number and normalize_invoice_number(row.get("invoice_number")) == normalized_invoice_number
+                ) or (
+                    not normalized_invoice_number and str(row.get("invoice_date") or "")[:10] == str(invoice_date)[:10] and round(float(row.get("amount") or 0), 2) == round(taxable_amount, 2) and round(float(row.get("gst_amount") or 0), 2) == round(gst_amount, 2)
+                )]
+            if duplicate_rows and not force_save:
+                existing = duplicate_rows[0]
+                return func.HttpResponse(_safe_json({
+                    "ok": False,
+                    "duplicate": True,
+                    "error": "Potential duplicate detected.",
+                    "data": {"existing": existing, "kind": "invoice"},
+                }), mimetype="application/json", status_code=409)
+
+            invoice_number = supplied_invoice_number or f"INV-{int(datetime.now().timestamp())}"
+            if force_save:
+                invoice_number = f"{invoice_number}-DUP-{int(datetime.now().timestamp())}"
+                dedup_fingerprint = f"{dedup_fingerprint}-override-{identity.get('user_id')}-{int(datetime.now().timestamp())}"
+
             new_invoice = {
                 "company_id": company_id,
                 "customer_id": customer_id,
-                "invoice_number": data.get("invoice_number") or f"INV-{int(datetime.now().timestamp())}",
+                "invoice_number": invoice_number,
+                "normalized_invoice_number": normalized_invoice_number,
+                "dedup_fingerprint": dedup_fingerprint,
+                "dedup_override": force_save,
                 "invoice_date": invoice_date,
                 "due_date": due_date,
                 "amount": taxable_amount,
@@ -190,6 +260,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
             try:
                 response = _insert_invoice_with_fallback(supabase, new_invoice)
+                audit.record(supabase, tenant_context, "upload", "cashflow_invoice", response.data[0].get("id") if response.data else None, "success", {"source": "ar", "invoice_number": invoice_number, "force_save": force_save})
             except Exception as insert_error:
                 if _is_missing_table_error(insert_error):
                     return func.HttpResponse(
@@ -197,6 +268,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                         mimetype="application/json",
                         status_code=500,
                     )
+                if "23505" in str(insert_error) or "duplicate key value" in str(insert_error).lower():
+                    raced = supabase.table("cashflow_invoices").select("id,invoice_number,invoice_date,amount,gst_amount,cashflow_entities(name)").eq("company_id", company_id).eq("dedup_fingerprint", dedup_fingerprint).limit(1).execute().data or []
+                    if raced and not force_save:
+                        return func.HttpResponse(_safe_json({"ok": False, "duplicate": True, "error": "Potential duplicate detected.", "data": {"existing": raced[0], "kind": "invoice"}}), mimetype="application/json", status_code=409)
                 raise
 
             # Re-fetch with customer details to return to frontend
@@ -238,6 +313,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
             invoice = invoice_rows[0]
             current_status = str(invoice.get("status") or "")
+            if current_status.lower() not in {"approved", "overdue"}:
+                return func.HttpResponse(_safe_json({"ok": False, "error": "The invoice must be approved before a collection can be recorded."}), mimetype="application/json", status_code=409)
             if current_status == "paid":
                 return func.HttpResponse(_safe_json({"ok": False, "error": "Invoice is already paid"}), mimetype="application/json", status_code=400)
 

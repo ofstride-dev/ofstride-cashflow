@@ -4,13 +4,15 @@
 // has been restyled onto the shared design system.
 
 import { useState, useEffect, useRef } from 'react';
-import { Download, FileUp, Plus, Trash2 } from 'lucide-react';
+import { Download, Edit2, FileUp, Plus, Trash2 } from 'lucide-react';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { exportRowsAsCsv } from '../../services/csvExport';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
 import { supabase } from '../../services/supabase';
 import CollectAmountModal from './CollectAmountModal';
 import { parseInvoiceSpreadsheet } from '../../services/invoiceDocumentParser';
+import DuplicateDocumentModal from './DuplicateDocumentModal';
+import AdminMutationModal from './AdminMutationModal';
 
 const GST_SERVICE_RATES = [
   { value: '0', label: 'GST-exempt service (0%)' },
@@ -67,6 +69,9 @@ export default function AccountsReceivable() {
   const [ocrStatus, setOcrStatus] = useState('');
   const [approvingId, setApprovingId] = useState('');
   const [collectInvoice, setCollectInvoice] = useState(null);
+  const [duplicateCandidate, setDuplicateCandidate] = useState(null);
+  const [adminTarget, setAdminTarget] = useState(null);
+  const [editingId, setEditingId] = useState('');
   const [lineItems, setLineItems] = useState([{ ...emptyLineItem }]);
   const subTotal = Number(lineItems.reduce((total, item) => total + Number(item.lineTotal || 0), 0).toFixed(3));
   
@@ -324,11 +329,12 @@ export default function AccountsReceivable() {
     reader.readAsDataURL(file);
   };
 
-  const handleCreateInvoice = async (e) => {
+  const handleCreateInvoice = async (e, forceSave = false) => {
     e.preventDefault();
     const requestIdentityKey = authIdentityKey;
     const invoicePayload = {
       ...formData,
+      ...(editingId ? { invoice_id: editingId, reason: 'Manual edit', comment: 'Edited from Accounts Receivable' } : { force_save: forceSave }),
       item_services: lineItems.map((item) => item.itemName).filter(Boolean),
       line_items: lineItems,
       party_details: {
@@ -341,7 +347,7 @@ export default function AccountsReceivable() {
     delete invoicePayload.gst_rate;
     setSaving(true);
     try {
-      const res = await cashflowFetch('/cashflow/ar/create', {
+      const res = await cashflowFetch(editingId ? '/cashflow/ar/update' : '/cashflow/ar/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(invoicePayload)
@@ -349,7 +355,8 @@ export default function AccountsReceivable() {
       const parsed = await parseCashflowResponse(res);
       if (activeIdentityKeyRef.current !== requestIdentityKey) return;
       if (parsed.ok) {
-        setInvoices((previousInvoices) => [parsed.data, ...previousInvoices]);
+        setInvoices((previousInvoices) => editingId ? previousInvoices.map((item) => item.id === editingId ? parsed.data : item) : [parsed.data, ...previousInvoices]);
+        setEditingId('');
         setFormData({ 
             customer_name: '', customer_gstin: '', customer_address: '', invoice_number: '', invoice_raised_by: '', discount_percent: '',
           invoice_date: new Date().toISOString().split('T')[0], 
@@ -357,6 +364,11 @@ export default function AccountsReceivable() {
         });
           setLineItems([{ ...emptyLineItem }]);
       } else {
+        if (parsed.status === 409 && parsed.data?.existing) {
+          setDuplicateCandidate({ ...parsed.data, partyName: formData.customer_name });
+          return;
+        }
+        setOcrStatus(parsed.error || 'Unable to save invoice.');
         throw new Error(parsed.error || `Server error ${parsed.status}`);
       }
     } catch (err) {
@@ -365,6 +377,22 @@ export default function AccountsReceivable() {
     } finally {
       if (activeIdentityKeyRef.current === requestIdentityKey) setSaving(false);
     }
+  };
+
+  const startEditInvoice = (invoice) => {
+    setEditingId(invoice.id);
+    setFormData((previous) => ({ ...previous, customer_name: invoice.cashflow_entities?.name || invoice.party_details?.customer_name || '', customer_gstin: invoice.cashflow_entities?.gstin || invoice.party_details?.customer_gstin || '', invoice_number: invoice.invoice_number || '', invoice_date: invoice.invoice_date || '', due_date: invoice.due_date || '', amount: String(invoice.amount || 0), gst_amount: String(invoice.gst_amount || 0), notes: invoice.notes || '' }));
+    setLineItems(Array.isArray(invoice.line_items) && invoice.line_items.length ? invoice.line_items : [{ ...emptyLineItem }]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const confirmAdminAction = async ({ reason, comment }) => {
+    if (!adminTarget) return;
+    const response = await cashflowFetch(`/cashflow/ar/${adminTarget.action}`, { method: 'POST', body: JSON.stringify({ invoice_id: adminTarget.id, reason, comment }) });
+    const parsed = await parseCashflowResponse(response);
+    if (!parsed.ok) throw new Error(parsed.error || `Could not ${adminTarget.action} invoice.`);
+    setAdminTarget(null);
+    await fetchInvoices(() => activeIdentityKeyRef.current === authIdentityKey);
   };
 
   const handleRecordPayment = async (invoice, paymentAmount) => {
@@ -660,6 +688,7 @@ export default function AccountsReceivable() {
             </div>
           </div>
 
+          <div className="col-span-full rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950">Confirm every customer, invoice number, date, tax field, line item, and total before saving this invoice.</div>
           <div className="col-span-full flex flex-wrap items-center gap-2">
             <button type="submit" disabled={saving} className="btn-ui btn-ui-primary h-[45px]">
               {saving ? 'Creating...' : 'Create Invoice'}
@@ -674,7 +703,7 @@ export default function AccountsReceivable() {
         </form>
       </div>
 
-      <div className="scroll-ui overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
+      <div id="ar-invoice-list" className="scroll-ui overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
         {loading ? (
           <TableSkeleton />
         ) : (
@@ -717,6 +746,7 @@ export default function AccountsReceivable() {
                     </td>
                     <td className="sticky right-0 bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,.35)]">
                       <div className="flex flex-wrap items-center gap-2">
+                        {isAdmin && <><button type="button" onClick={() => startEditInvoice(inv)} aria-label="Edit invoice" title="Edit invoice" className="btn-ui btn-ui-sm btn-ui-secondary"><Edit2 className="h-3.5 w-3.5" /></button><button type="button" onClick={() => setAdminTarget({ id: inv.id, action: 'delete' })} aria-label="Delete invoice" title="Delete invoice" className="btn-ui btn-ui-sm btn-ui-danger"><Trash2 className="h-3.5 w-3.5" /></button></>}
                         {inv.status === 'pending' && !inv.is_proforma && isAdmin && (
                           <button
                             onClick={() => handleApproveInvoice(inv.id)}
@@ -726,13 +756,13 @@ export default function AccountsReceivable() {
                             {approvingId === inv.id ? 'Approving...' : 'Approve'}
                           </button>
                         )}
-                        {inv.status !== 'paid' && !inv.is_proforma && (
+                        {['approved', 'overdue'].includes(String(inv.status || '').toLowerCase()) && Number(inv.balance_due ?? total) > 0 && !inv.is_proforma && (
                            <button onClick={() => setCollectInvoice(inv)} className="btn-ui btn-ui-sm btn-ui-info">
                             Collect
                           </button>
                         )}
-                        <button onClick={() => downloadInvoice(inv)} className="btn-ui btn-ui-sm btn-ui-neutral">
-                          Download
+                        <button type="button" onClick={() => downloadInvoice(inv)} aria-label="Download invoice" title="Download invoice" className="btn-ui btn-ui-sm btn-ui-neutral">
+                          <Download className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </td>
@@ -756,10 +786,24 @@ export default function AccountsReceivable() {
         onClose={() => setCollectInvoice(null)}
         onConfirm={(amount) => handleRecordPayment(collectInvoice, amount)}
         documentLabel="Invoice"
+        paymentAction="Collect"
         documentNumber={collectInvoice?.invoice_number}
         grossAmount={Number(collectInvoice?.amount || 0) + Number(collectInvoice?.gst_amount || 0)}
         remainingBalance={collectInvoice ? Number(collectInvoice.balance_due ?? (Number(collectInvoice.amount || 0) + Number(collectInvoice.gst_amount || 0))) : 0}
       />
+      <DuplicateDocumentModal
+        duplicate={duplicateCandidate}
+        onClose={() => setDuplicateCandidate(null)}
+        onViewExisting={() => {
+          setDuplicateCandidate(null);
+          document.getElementById('ar-invoice-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }}
+        onForceSave={async () => {
+          setDuplicateCandidate(null);
+          await handleCreateInvoice({ preventDefault() {} }, true);
+        }}
+      />
+      <AdminMutationModal action={adminTarget?.action} documentLabel="Invoice" onClose={() => setAdminTarget(null)} onConfirm={confirmAdminAction} />
     </div>
   );
 }

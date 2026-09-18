@@ -11,6 +11,7 @@ import CashflowResetPassword from './pages/cashflow/CashflowResetPassword'
 import AccountsPayable from './components/cashflow/AccountsPayable'
 import AccountsReceivable from './components/cashflow/AccountsReceivable'
 import BankStatementReconcile from './components/cashflow/BankStatementReconcile'
+import TallySync from './pages/cashflow/TallySync'
 
 import MyExpenses from './pages/expenses/MyExpenses'
 import SubmitExpense from './pages/expenses/SubmitExpense'
@@ -70,6 +71,8 @@ function App() {
           <Route path="/cashflow/pettycash" element={<Navigate to="/cashflow/expense" replace />} />
           <Route path="/reconcile" element={<BankStatementReconcile />} />
           <Route path="/cashflow/reconcile" element={<BankStatementReconcile />} />
+          <Route path="/tally-sync" element={<TallySync />} />
+          <Route path="/cashflow/tally-sync" element={<TallySync />} />
 
           {/* Expenses */}
           <Route path="/expenses" element={<MyExpenses />} />
