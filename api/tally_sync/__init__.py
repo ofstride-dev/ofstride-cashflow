@@ -40,6 +40,15 @@ def _amount(value):
 def _debit_credit(amount, deemed_positive):
     return "debit" if _text(deemed_positive).lower() == "yes" else "credit"
 
+def _bill_allocations(node):
+    allocations = []
+    for allocation in [child for child in node.iter() if _tag(child) == "BILLALLOCATIONS.LIST"]:
+        values = {_tag(child): _text(child.text) for child in allocation.iter() if child is not allocation}
+        reference = values.get("NAME") or values.get("BILLNAME") or values.get("REFERENCE")
+        if reference:
+            allocations.append({"reference": reference, "amount": _amount(values.get("AMOUNT")), "bill_type": values.get("BILLTYPE", "Agst Ref")})
+    return allocations
+
 def _record_ledger(node):
     values = {_tag(child): _text(child.text) for child in node}
     parent = values.get("PARENT", "")
@@ -54,15 +63,11 @@ def _record_voucher(node):
     voucher_type = values.get("VOUCHERTYPENAME", "").lower()
     if not voucher_type or not values.get("VOUCHERNUMBER") or voucher_type not in {"sales", "purchase", "receipt", "payment"}:
         return None
-    allocation_amount = sum(_amount(child.text) for child in node.iter() if _tag(child) == "AMOUNT" and any(_tag(parent) == "BILLALLOCATIONS.LIST" for parent in []))
-    # ElementTree does not expose parents; bill rows are found by walking each voucher child.
-    allocation_amount = 0.0
-    for allocation in [child for child in node.iter() if _tag(child) == "BILLALLOCATIONS.LIST"]:
-        for amount in allocation.iter():
-            if _tag(amount) == "AMOUNT": allocation_amount += _amount(amount.text)
+    allocations = _bill_allocations(node)
+    allocation_amount = sum(item["amount"] for item in allocations)
     amount = allocation_amount or sum(_amount(child.text) for child in node.iter() if _tag(child) == "AMOUNT")
     deemed_positive = values.get("ISDEEMEDPOSITIVE", "")
-    return {"invoice_id": values["VOUCHERNUMBER"], "remote_id": values.get("REMOTEID") or None, "invoice_date": _date(values.get("DATE")), "total_amount": amount, "direction": _debit_credit(amount, deemed_positive), "voucher_type": voucher_type, "party_name": values.get("PARTYLEDGERNAME") or values.get("LEDGERNAME") or "Tally Voucher"}
+    return {"invoice_id": values["VOUCHERNUMBER"], "remote_id": values.get("REMOTEID") or values.get("GUID") or None, "invoice_date": _date(values.get("DATE")), "total_amount": amount, "direction": _debit_credit(amount, deemed_positive), "voucher_type": voucher_type, "party_name": values.get("PARTYLEDGERNAME") or values.get("LEDGERNAME") or "Tally Voucher", "allocations": allocations}
 
 def _parse_xml(raw):
     root = ET.fromstring(raw)
@@ -97,7 +102,13 @@ def _dashboard(client, company_id):
     transactions = client.table("cashflow_transactions").select("amount,transaction_type").eq("company_id", company_id).execute().data or []
     inflow = sum(float(row.get("amount") or 0) for row in transactions if row.get("transaction_type") == "INFLOW")
     outflow = sum(float(row.get("amount") or 0) for row in transactions if row.get("transaction_type") == "OUTFLOW")
-    return {"total_accounts_receivable": round(sum(float(row.get("amount") or 0) + float(row.get("gst_amount") or 0) for row in invoices), 2), "total_accounts_payable": round(sum(float(row.get("amount") or 0) + float(row.get("gst_amount") or 0) for row in bills), 2), "net_cash_flow": round(inflow - outflow, 2), "inflow": round(inflow, 2), "outflow": round(outflow, 2)}
+    invoice_ids = [row.get("id") for row in invoices if row.get("id")]
+    payments = client.table("cashflow_transactions").select("invoice_id,amount").eq("company_id", company_id).in_("invoice_id", invoice_ids).execute().data or [] if invoice_ids else []
+    paid_by_invoice = {}
+    for payment in payments:
+        paid_by_invoice[payment.get("invoice_id")] = paid_by_invoice.get(payment.get("invoice_id"), 0) + float(payment.get("amount") or 0)
+    receivable = sum(max(float(row.get("amount") or 0) + float(row.get("gst_amount") or 0) - paid_by_invoice.get(row.get("id"), 0), 0) for row in invoices)
+    return {"total_accounts_receivable": round(receivable, 2), "total_accounts_payable": round(sum(float(row.get("amount") or 0) + float(row.get("gst_amount") or 0) for row in bills), 2), "net_cash_flow": round(inflow - outflow, 2), "inflow": round(inflow, 2), "outflow": round(outflow, 2)}
 
 def _import(req, auth):
     body = req.get_json()
@@ -110,7 +121,11 @@ def _import(req, auth):
     entity_ids = {}
     for ledger in parsed["ledgers"]:
         entity_ids[(ledger["name"], ledger["entity_type"])] = _entity(client, company_id, ledger)
-    for voucher in parsed["vouchers"]:
+    vouchers = sorted(
+        parsed["vouchers"],
+        key=lambda item: 0 if _text(item.get("voucher_type") or item.get("VOUCHERTYPENAME")).lower() in {"sales", "purchase"} else 1,
+    )
+    for voucher in vouchers:
         try:
             voucher_type = _text(voucher.get("voucher_type")).lower()
             number = _text(voucher.get("invoice_id") or voucher.get("VOUCHERNUMBER"))
@@ -118,7 +133,7 @@ def _import(req, auth):
             amount = _amount(voucher.get("total_amount") or voucher.get("AMOUNT"))
             party = _text(voucher.get("party_name") or voucher.get("PARTYLEDGERNAME"))
             if not number: counts["skipped"] += 1; continue
-            source = {"company_id": company_id, "invoice_id": number, "remote_id": voucher.get("remote_id") or voucher.get("REMOTEID"), "voucher_type": voucher_type, "voucher_date": date_value, "total_amount": amount, "direction": _debit_credit(amount, voucher.get("ISDEEMEDPOSITIVE")), "raw_data": voucher, "created_by": identity.get("user_id")}
+            source = {"company_id": company_id, "invoice_id": number, "remote_id": voucher.get("remote_id") or voucher.get("REMOTEID") or voucher.get("GUID"), "voucher_type": voucher_type, "voucher_date": date_value, "total_amount": amount, "direction": _debit_credit(amount, voucher.get("ISDEEMEDPOSITIVE")), "raw_data": voucher, "created_by": identity.get("user_id")}
             existing = []
             if source["remote_id"]:
                 existing = client.table("cashflow_tally_records").select("id,invoice_id").eq("company_id", company_id).eq("remote_id", source["remote_id"]).limit(1).execute().data or []
@@ -128,8 +143,8 @@ def _import(req, auth):
                 client.table("cashflow_tally_records").update(source).eq("id", existing[0]["id"]).eq("company_id", company_id).execute()
                 counts["updated"] += 1
                 duplicates.append({"invoice_id": number, "remote_id": source["remote_id"], "reason": "REMOTEID" if source["remote_id"] else "invoice_id"})
-                continue
-            client.table("cashflow_tally_records").insert(source).execute(); counts["imported"] += 1
+            else:
+                client.table("cashflow_tally_records").insert(source).execute(); counts["imported"] += 1
             if voucher_type in {"sales", "purchase"}:
                 entity_type = "customer" if voucher_type == "sales" else "vendor"
                 entity_id = entity_ids.get((party, entity_type)) or _entity(client, company_id, {"name": party or "Tally Party", "entity_type": entity_type, "gstin": None, "gstin_status": "unregistered"})
@@ -137,7 +152,39 @@ def _import(req, auth):
                 payload = {"company_id": company_id, entity_column: entity_id, number_column: number, date_column: date_value, "due_date": date_value, "payment_terms_days": 0, "amount": amount, "gst_amount": 0, "status": "pending", "created_by": identity.get("user_id")} if voucher_type == "purchase" else {"company_id": company_id, entity_column: entity_id, number_column: number, date_column: date_value, "due_date": date_value, "amount": amount, "gst_amount": 0, "status": "pending", "is_proforma": False, "created_by": identity.get("user_id")}
                 client.table(table).upsert(payload, on_conflict=f"company_id,{number_column}").execute()
             elif voucher_type in {"receipt", "payment"}:
-                client.table("cashflow_transactions").insert({"company_id": company_id, "transaction_date": date_value, "amount": amount, "transaction_type": "INFLOW" if voucher_type == "receipt" else "OUTFLOW", "payment_mode": "tally", "reference_no": number, "category": "Cash Collected" if voucher_type == "receipt" else "Cash Disbursed", "created_by": identity.get("user_id")}).execute()
+                transaction_type = "INFLOW" if voucher_type == "receipt" else "OUTFLOW"
+                allocations = voucher.get("allocations") or []
+                if not allocations:
+                    allocations = [{"reference": None, "amount": amount}]
+                for allocation in allocations:
+                    reference = _text(allocation.get("reference"))
+                    linked_invoice_id = None
+                    linked_bill_id = None
+                    if reference:
+                        linked_invoices = client.table("cashflow_invoices").select("id").eq("company_id", company_id).eq("invoice_number", reference).limit(1).execute().data or []
+                        linked_bills = client.table("cashflow_bills").select("id").eq("company_id", company_id).eq("bill_number", reference).limit(1).execute().data or []
+                        linked_invoice_id = linked_invoices[0]["id"] if linked_invoices else None
+                        linked_bill_id = linked_bills[0]["id"] if linked_bills else None
+                    payment_amount = _amount(allocation.get("amount")) or amount
+                    existing_payment_query = client.table("cashflow_transactions").select("id").eq("company_id", company_id).eq("payment_mode", "tally")
+                    if source["remote_id"]:
+                        existing_payment_query = existing_payment_query.eq("tally_remote_id", source["remote_id"])
+                    else:
+                        existing_payment_query = existing_payment_query.eq("tally_voucher_number", number)
+                    if linked_invoice_id:
+                        existing_payment_query = existing_payment_query.eq("invoice_id", linked_invoice_id)
+                    else:
+                        existing_payment_query = existing_payment_query.is_("invoice_id", "null")
+                    if linked_bill_id:
+                        existing_payment_query = existing_payment_query.eq("bill_id", linked_bill_id)
+                    else:
+                        existing_payment_query = existing_payment_query.is_("bill_id", "null")
+                    existing_payment = existing_payment_query.limit(1).execute().data or []
+                    payment_payload = {"company_id": company_id, "transaction_date": date_value, "amount": payment_amount, "transaction_type": transaction_type, "payment_mode": "tally", "reference_no": number, "tally_voucher_number": number, "tally_remote_id": source["remote_id"], "category": "Cash Collected" if voucher_type == "receipt" else "Cash Disbursed", "created_by": identity.get("user_id"), "invoice_id": linked_invoice_id, "bill_id": linked_bill_id}
+                    if existing_payment:
+                        client.table("cashflow_transactions").update(payment_payload).eq("company_id", company_id).eq("id", existing_payment[0]["id"]).execute()
+                    else:
+                        client.table("cashflow_transactions").insert(payment_payload).execute()
         except Exception:
             counts["errors"] += 1
     audit.record(client, tenant_context, "upload", "tally_import", None, "success", {"counts": counts, "duplicates": duplicates})

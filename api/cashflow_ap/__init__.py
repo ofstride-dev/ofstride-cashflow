@@ -418,6 +418,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             record = current[0]
             if action == "delete":
                 audit.record(supabase, tenant_context, "delete", "cashflow_bill", bill_id, "success", {"reason": reason, "comment": comment, "record": record})
+                supabase.table("cashflow_transactions").delete().eq("company_id", company_id).eq("bill_id", bill_id).execute()
+                supabase.table("expenses").update({"ap_bill_id": None}).eq("company_id", company_id).eq("ap_bill_id", bill_id).execute()
                 supabase.table("cashflow_bills").delete().eq("company_id", company_id).eq("id", bill_id).execute()
                 return func.HttpResponse(json.dumps({"ok": True, "data": {"id": bill_id, "deleted": True}}), mimetype="application/json")
             if action == "void":

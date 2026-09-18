@@ -35,7 +35,7 @@ function voucherRecord(node) {
   const allocations = Array.isArray(node['BILLALLOCATIONS.LIST']) ? node['BILLALLOCATIONS.LIST'] : [];
   const amount = allocations.reduce((sum, allocation) => sum + absoluteNumber(first(allocation.AMOUNT)), 0);
   const deemedPositive = text(node.ISDEEMEDPOSITIVE);
-  return { invoice_id: text(node.VOUCHERNUMBER), remote_id: text(node.REMOTEID), invoice_date: parseTallyDate(node.DATE), total_amount: amount, amount_normalization: normalizeAmount(amount, deemedPositive), voucher_type: voucherType, cashflow_type: voucherType === 'receipt' ? 'Cash Collected' : voucherType === 'payment' ? 'Cash Disbursed' : voucherType, entity_name: text(node.PARTYLEDGERNAME || node.LEDGERNAME) };
+  return { invoice_id: text(node.VOUCHERNUMBER), remote_id: text(node.REMOTEID || node.GUID), invoice_date: parseTallyDate(node.DATE), total_amount: amount, amount_normalization: normalizeAmount(amount, deemedPositive), voucher_type: voucherType, cashflow_type: voucherType === 'receipt' ? 'Cash Collected' : voucherType === 'payment' ? 'Cash Disbursed' : voucherType, entity_name: text(node.PARTYLEDGERNAME || node.LEDGERNAME), allocations: allocations.map((allocation) => ({ reference: text(allocation.NAME || allocation.BILLNAME || allocation.REFERENCE), amount: absoluteNumber(first(allocation.AMOUNT)), bill_type: text(allocation.BILLTYPE) || 'Agst Ref' })).filter((allocation) => allocation.reference) };
 }
 
 function collect(root, key) {

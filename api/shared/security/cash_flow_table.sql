@@ -143,6 +143,9 @@ UPDATE public.cashflow_transactions SET transaction_type = CASE WHEN invoice_id 
 ALTER TABLE public.cashflow_transactions ALTER COLUMN transaction_type SET DEFAULT 'INFLOW';
 ALTER TABLE public.cashflow_transactions ALTER COLUMN transaction_type SET NOT NULL;
 
+ALTER TABLE public.cashflow_transactions ADD COLUMN IF NOT EXISTS tally_voucher_number TEXT;
+ALTER TABLE public.cashflow_transactions ADD COLUMN IF NOT EXISTS tally_remote_id TEXT;
+
 -- 6. PETTY CASH & AUTOCATEGORIZATION LEDGER
 CREATE TABLE IF NOT EXISTS public.cashflow_petty_cash (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

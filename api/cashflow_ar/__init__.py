@@ -160,6 +160,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             record = current[0]
             if action == "delete":
                 audit.record(supabase, tenant_context, "delete", "cashflow_invoice", invoice_id, "success", {"reason": reason, "comment": comment, "record": record})
+                supabase.table("cashflow_transactions").delete().eq("company_id", company_id).eq("invoice_id", invoice_id).execute()
                 supabase.table("cashflow_invoices").delete().eq("company_id", company_id).eq("id", invoice_id).execute()
                 return func.HttpResponse(_safe_json({"ok": True, "data": {"id": invoice_id, "deleted": True}}), mimetype="application/json")
             if action == "void":
