@@ -248,7 +248,7 @@ function CashflowShell() {
             className="absolute inset-0 bg-slate-900/45 backdrop-blur-[1px]"
             onClick={() => setIsMobileNavOpen(false)}
           />
-          <div className="dashboard-sidebaR relative z-10 flex h-full w-72 max-w-[85vw] flex-col shadow-2xl">
+          <div className="dashboard-sidebar relative z-10 flex h-full w-72 max-w-[85vw] flex-col shadow-2xl">
             <div className="flex items-center justify-between px-5 py-5 border-b border-white/10">
               <Link to="/cashflow/dashboard" onClick={() => setIsMobileNavOpen(false)} aria-label="Go to CashPulse dashboard">
                 <span className="block w-56 p-0 pt-2 leading-none">
