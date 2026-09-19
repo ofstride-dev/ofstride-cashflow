@@ -29,13 +29,63 @@ function ledgerRecord(node) {
   return { entity_name: text(node.LEDGERNAME), gstin: gstin || null, gstin_status: GSTIN_PATTERN.test(gstin) ? 'registered' : 'unregistered', entity_type: entityType, parent };
 }
 
+function nestedValue(node, names) {
+  const wanted = new Set(names.map((name) => name.toUpperCase()));
+  let result = '';
+  const visit = (value) => {
+    if (!value || typeof value !== 'object' || result) return;
+    Object.entries(value).forEach(([name, child]) => {
+      if (result) return;
+      if (wanted.has(name.toUpperCase())) result = text(child);
+      else if (child && typeof child === 'object') visit(child);
+    });
+  };
+  visit(node);
+  return result;
+}
+
+function partyLedgerRecord(node) {
+  const entries = Array.isArray(node['ALLLEDGERENTRIES.LIST']) ? node['ALLLEDGERENTRIES.LIST'] : [];
+  const partyEntry = entries.find((entry) => /^no$/i.test(text(entry.ISDEEMEDPOSITIVE)) && text(entry.PARTYLEDGERNAME || entry.LEDGERNAME));
+  return text(partyEntry?.PARTYLEDGERNAME || partyEntry?.LEDGERNAME || node.PARTYLEDGERNAME || node.LEDGERNAME);
+}
+
+function partyGstinRecord(node, partyName) {
+  const entries = Array.isArray(node['ALLLEDGERENTRIES.LIST']) ? node['ALLLEDGERENTRIES.LIST'] : [];
+  const partyEntry = entries.find((entry) => text(entry.PARTYLEDGERNAME || entry.LEDGERNAME) === partyName);
+  return text(partyEntry?.PARTYGSTIN || partyEntry?.GSTIN || node.PARTYGSTIN || node.GSTIN).toUpperCase();
+}
+
+function taxBreakdownRecord(node) {
+  const tax = { igst_amount: 0, cgst_amount: 0, sgst_amount: 0 };
+  const entries = Array.isArray(node['ALLLEDGERENTRIES.LIST']) ? node['ALLLEDGERENTRIES.LIST'] : [];
+  entries.forEach((entry) => {
+    const name = text(entry.LEDGERNAME || entry.PARTYLEDGERNAME).toLowerCase();
+    const amount = absoluteNumber(first(entry.AMOUNT));
+    if (name.includes('igst')) tax.igst_amount += amount;
+    else if (name.includes('cgst')) tax.cgst_amount += amount;
+    else if (name.includes('sgst')) tax.sgst_amount += amount;
+  });
+  return Object.fromEntries(Object.entries(tax).map(([key, value]) => [key, Number(value.toFixed(2))]));
+}
+
+function partyAmountRecord(node, partyName) {
+  const entries = Array.isArray(node['ALLLEDGERENTRIES.LIST']) ? node['ALLLEDGERENTRIES.LIST'] : [];
+  const partyEntry = entries.find((entry) => text(entry.PARTYLEDGERNAME || entry.LEDGERNAME) === partyName);
+  return absoluteNumber(first(partyEntry?.AMOUNT));
+}
+
 function voucherRecord(node) {
-  const voucherType = text(node.VOUCHERTYPENAME).toLowerCase();
-  if (!voucherType) return null;
-  const allocations = Array.isArray(node['BILLALLOCATIONS.LIST']) ? node['BILLALLOCATIONS.LIST'] : [];
-  const amount = allocations.reduce((sum, allocation) => sum + absoluteNumber(first(allocation.AMOUNT)), 0);
+  const voucherType = text(node.VOUCHERTYPENAME || node.VCHTYPE || node.$?.VCHTYPE).toLowerCase();
+  if (!voucherType || !['sales', 'purchase', 'receipt', 'payment'].includes(voucherType)) return null;
+  const allocations = Array.isArray(node['BILLALLOCATIONS.LIST']) ? node['BILLALLOCATIONS.LIST'] : collect(node, 'BILLALLOCATIONS.LIST');
+  const allocationAmount = allocations.reduce((sum, allocation) => sum + absoluteNumber(first(allocation.AMOUNT)), 0);
   const deemedPositive = text(node.ISDEEMEDPOSITIVE);
-  return { invoice_id: text(node.VOUCHERNUMBER), remote_id: text(node.REMOTEID || node.GUID), invoice_date: parseTallyDate(node.DATE), total_amount: amount, amount_normalization: normalizeAmount(amount, deemedPositive), voucher_type: voucherType, cashflow_type: voucherType === 'receipt' ? 'Cash Collected' : voucherType === 'payment' ? 'Cash Disbursed' : voucherType, entity_name: text(node.PARTYLEDGERNAME || node.LEDGERNAME), allocations: allocations.map((allocation) => ({ reference: text(allocation.NAME || allocation.BILLNAME || allocation.REFERENCE), amount: absoluteNumber(first(allocation.AMOUNT)), bill_type: text(allocation.BILLTYPE) || 'Agst Ref' })).filter((allocation) => allocation.reference) };
+  const dateValue = text(node.DATE || nestedValue(node, ['DATE']));
+  const purchaseParty = partyLedgerRecord(node);
+  const tax = taxBreakdownRecord(node);
+  const amount = allocationAmount || partyAmountRecord(node, purchaseParty) || collect(node, 'AMOUNT').reduce((sum, value) => sum + absoluteNumber(first(value)), 0);
+  return { invoice_id: text(node.VOUCHERNUMBER || nestedValue(node, ['VOUCHERNUMBER'])), remote_id: text(node.REMOTEID || node.GUID || nestedValue(node, ['REMOTEID', 'GUID'])), invoice_date: parseTallyDate(dateValue), total_amount: amount, taxable_value: Math.max(0, amount - tax.igst_amount - tax.cgst_amount - tax.sgst_amount), ...tax, amount_normalization: normalizeAmount(amount, deemedPositive), voucher_type: voucherType, cashflow_type: voucherType === 'receipt' ? 'Cash Collected' : voucherType === 'payment' ? 'Cash Disbursed' : voucherType, entity_name: purchaseParty, party_gstin: partyGstinRecord(node, purchaseParty), allocations: allocations.map((allocation) => ({ reference: text(allocation.NAME || allocation.BILLNAME || allocation.REFERENCE), amount: absoluteNumber(first(allocation.AMOUNT)), bill_type: text(allocation.BILLTYPE) || 'Agst Ref' })).filter((allocation) => allocation.reference) };
 }
 
 function collect(root, key) {

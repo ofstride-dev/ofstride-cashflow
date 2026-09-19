@@ -12,6 +12,7 @@ import AccountsPayable from './components/cashflow/AccountsPayable'
 import AccountsReceivable from './components/cashflow/AccountsReceivable'
 import BankStatementReconcile from './components/cashflow/BankStatementReconcile'
 import TallySync from './pages/cashflow/TallySync'
+import GstrReconcile from './pages/cashflow/GstrReconcile'
 
 import MyExpenses from './pages/expenses/MyExpenses'
 import SubmitExpense from './pages/expenses/SubmitExpense'
@@ -73,6 +74,8 @@ function App() {
           <Route path="/cashflow/reconcile" element={<BankStatementReconcile />} />
           <Route path="/tally-sync" element={<TallySync />} />
           <Route path="/cashflow/tally-sync" element={<TallySync />} />
+          <Route path="/gstr-reconcile" element={<GstrReconcile />} />
+          <Route path="/cashflow/gstr-reconcile" element={<GstrReconcile />} />
 
           {/* Expenses */}
           <Route path="/expenses" element={<MyExpenses />} />

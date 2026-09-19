@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
@@ -18,6 +19,7 @@ from shared.tenant import audit, TenantContext
 
 GSTIN_RE = re.compile(r"^[0-9A-Z]{15}$", re.I)
 SUPPORTED = {".xml", ".json", ".xlsx"}
+LOGGER = logging.getLogger("ofstride.cashflow.tally_sync")
 
 def _text(value):
     return str(value or "").strip()
@@ -49,6 +51,51 @@ def _bill_allocations(node):
             allocations.append({"reference": reference, "amount": _amount(values.get("AMOUNT")), "bill_type": values.get("BILLTYPE", "Agst Ref")})
     return allocations
 
+def _first_value(node, *names):
+    wanted = {name.upper() for name in names}
+    for child in node.iter():
+        if _tag(child) in wanted and _text(child.text):
+            return _text(child.text)
+    return ""
+
+def _purchase_or_sales_party(node):
+    """Read the party ledger from nested Tally ledger-entry nodes."""
+    entries = [child for child in node.iter() if _tag(child) == "ALLLEDGERENTRIES.LIST"]
+    for entry in entries:
+        deemed_positive = _first_value(entry, "ISDEEMEDPOSITIVE").lower()
+        party = _first_value(entry, "PARTYLEDGERNAME", "LEDGERNAME")
+        if party and deemed_positive == "no":
+            return party
+    return _first_value(node, "PARTYLEDGERNAME", "LEDGERNAME")
+
+def _party_gstin(node, party_name):
+    for entry in [child for child in node.iter() if _tag(child) == "ALLLEDGERENTRIES.LIST"]:
+        entry_party = _first_value(entry, "PARTYLEDGERNAME", "LEDGERNAME")
+        if entry_party == party_name:
+            value = _first_value(entry, "PARTYGSTIN", "GSTIN")
+            if value:
+                return value.upper()
+    return (_first_value(node, "PARTYGSTIN", "GSTIN") or "").upper()
+
+def _tax_breakdown(node):
+    result = {"igst_amount": 0.0, "cgst_amount": 0.0, "sgst_amount": 0.0}
+    for entry in [child for child in node.iter() if _tag(child) == "ALLLEDGERENTRIES.LIST"]:
+        name = _first_value(entry, "LEDGERNAME", "PARTYLEDGERNAME").lower()
+        amount = _amount(_first_value(entry, "AMOUNT"))
+        if "igst" in name:
+            result["igst_amount"] += amount
+        elif "cgst" in name:
+            result["cgst_amount"] += amount
+        elif "sgst" in name:
+            result["sgst_amount"] += amount
+    return {key: round(value, 2) for key, value in result.items()}
+
+def _party_amount(node, party_name):
+    for entry in [child for child in node.iter() if _tag(child) == "ALLLEDGERENTRIES.LIST"]:
+        if _first_value(entry, "PARTYLEDGERNAME", "LEDGERNAME") == party_name:
+            return _amount(_first_value(entry, "AMOUNT"))
+    return 0.0
+
 def _record_ledger(node):
     values = {_tag(child): _text(child.text) for child in node}
     parent = values.get("PARENT", "")
@@ -60,14 +107,23 @@ def _record_ledger(node):
 
 def _record_voucher(node):
     values = {_tag(child): _text(child.text) for child in node if _tag(child) not in {"BILLALLOCATIONS.LIST", "ALLLEDGERENTRIES.LIST"}}
-    voucher_type = values.get("VOUCHERTYPENAME", "").lower()
-    if not voucher_type or not values.get("VOUCHERNUMBER") or voucher_type not in {"sales", "purchase", "receipt", "payment"}:
+    voucher_type = (values.get("VOUCHERTYPENAME") or values.get("VCHTYPE") or _text(node.attrib.get("VCHTYPE"))).lower()
+    voucher_number = values.get("VOUCHERNUMBER") or _first_value(node, "VOUCHERNUMBER")
+    voucher_date = values.get("DATE") or _first_value(node, "DATE")
+    if not voucher_type or not voucher_number or voucher_type not in {"sales", "purchase", "receipt", "payment"}:
         return None
     allocations = _bill_allocations(node)
     allocation_amount = sum(item["amount"] for item in allocations)
-    amount = allocation_amount or sum(_amount(child.text) for child in node.iter() if _tag(child) == "AMOUNT")
-    deemed_positive = values.get("ISDEEMEDPOSITIVE", "")
-    return {"invoice_id": values["VOUCHERNUMBER"], "remote_id": values.get("REMOTEID") or values.get("GUID") or None, "invoice_date": _date(values.get("DATE")), "total_amount": amount, "direction": _debit_credit(amount, deemed_positive), "voucher_type": voucher_type, "party_name": values.get("PARTYLEDGERNAME") or values.get("LEDGERNAME") or "Tally Voucher", "allocations": allocations}
+    party_name = _purchase_or_sales_party(node) or "Tally Voucher"
+    amount = allocation_amount or _party_amount(node, party_name) or sum(_amount(child.text) for child in node.iter() if _tag(child) == "AMOUNT")
+    deemed_positive = values.get("ISDEEMEDPOSITIVE", "") or _first_value(node, "ISDEEMEDPOSITIVE")
+    remote_id = values.get("REMOTEID") or values.get("GUID") or _first_value(node, "REMOTEID", "GUID") or None
+    try:
+        parsed_date = _date(voucher_date)
+    except ValueError:
+        return None
+    tax = _tax_breakdown(node)
+    return {"invoice_id": voucher_number, "remote_id": remote_id, "invoice_date": parsed_date, "total_amount": amount, "direction": _debit_credit(amount, deemed_positive), "voucher_type": voucher_type, "party_name": party_name, "party_gstin": _party_gstin(node, party_name), "taxable_value": round(max(amount - sum(tax.values()), 0), 2), **tax, "allocations": allocations}
 
 def _parse_xml(raw):
     root = ET.fromstring(raw)
@@ -93,8 +149,20 @@ def _json_response(data, status=200):
 def _entity(client, company_id, record):
     found = client.table("cashflow_entities").select("id").eq("company_id", company_id).eq("name", record["name"]).eq("entity_type", record["entity_type"]).limit(1).execute().data or []
     payload = {"company_id": company_id, "name": record["name"], "entity_type": record["entity_type"], "gstin": record.get("gstin"), "bank_details": {"tally_gstin_status": record.get("gstin_status")}}
-    if found: return found[0]["id"]
+    if found:
+        if record.get("gstin"):
+            client.table("cashflow_entities").update({"gstin": record["gstin"]}).eq("company_id", company_id).eq("id", found[0]["id"]).execute()
+        return found[0]["id"]
     return (client.table("cashflow_entities").insert(payload).execute().data or [{}])[0].get("id")
+
+def _save_purchase_bill(client, company_id, vendor_id, number, date_value, amount, voucher, identity):
+    """Update an existing vendor bill or insert it without relying on a missing ON CONFLICT constraint."""
+    existing = client.table("cashflow_bills").select("id").eq("company_id", company_id).eq("vendor_id", vendor_id).eq("bill_number", number).limit(1).execute().data or []
+    tax_total = sum(float(voucher.get(key) or 0) for key in ("cgst_amount", "sgst_amount", "igst_amount"))
+    payload = {"company_id": company_id, "vendor_id": vendor_id, "bill_number": number, "bill_date": date_value, "due_date": date_value, "payment_terms_days": 0, "amount": amount, "gst_amount": tax_total, "supplier_gstin": voucher.get("party_gstin") or None, "taxable_value": voucher.get("taxable_value"), "cgst_amount": voucher.get("cgst_amount", 0), "sgst_amount": voucher.get("sgst_amount", 0), "igst_amount": voucher.get("igst_amount", 0), "ocr_raw_data": {"source": "tally", "supplier_gstin": voucher.get("party_gstin"), "taxable_value": voucher.get("taxable_value"), "cgst_amount": voucher.get("cgst_amount", 0), "sgst_amount": voucher.get("sgst_amount", 0), "igst_amount": voucher.get("igst_amount", 0)}, "status": "pending", "created_by": identity.get("user_id")}
+    if existing:
+        return client.table("cashflow_bills").update(payload).eq("company_id", company_id).eq("id", existing[0]["id"]).execute()
+    return client.table("cashflow_bills").insert(payload).execute()
 
 def _dashboard(client, company_id):
     invoices = client.table("cashflow_invoices").select("amount,gst_amount").eq("company_id", company_id).in_("status", ["pending", "approved", "overdue"]).execute().data or []
@@ -117,10 +185,14 @@ def _import(req, auth):
     client = get_supabase_client(); company_id = auth["company_id"]; identity = auth.get("identity") or {}
     tenant_context = TenantContext(user_id=str(identity.get("user_id") or ""), company_id=company_id, role=str(identity.get("role") or ""), email=identity.get("email"), full_name=identity.get("full_name"))
     counts = {"imported": 0, "updated": 0, "skipped": 0, "errors": 0}
+    errors = []
     duplicates = []
     entity_ids = {}
+    ledger_gstins = {}
     for ledger in parsed["ledgers"]:
         entity_ids[(ledger["name"], ledger["entity_type"])] = _entity(client, company_id, ledger)
+        if ledger.get("gstin"):
+            ledger_gstins[(ledger["name"], ledger["entity_type"])] = ledger["gstin"]
     vouchers = sorted(
         parsed["vouchers"],
         key=lambda item: 0 if _text(item.get("voucher_type") or item.get("VOUCHERTYPENAME")).lower() in {"sales", "purchase"} else 1,
@@ -132,6 +204,8 @@ def _import(req, auth):
             date_value = voucher.get("invoice_date") or _date(voucher.get("DATE"))
             amount = _amount(voucher.get("total_amount") or voucher.get("AMOUNT"))
             party = _text(voucher.get("party_name") or voucher.get("PARTYLEDGERNAME"))
+            if voucher_type == "purchase" and not voucher.get("party_gstin"):
+                voucher["party_gstin"] = ledger_gstins.get((party, "vendor"))
             if not number: counts["skipped"] += 1; continue
             source = {"company_id": company_id, "invoice_id": number, "remote_id": voucher.get("remote_id") or voucher.get("REMOTEID") or voucher.get("GUID"), "voucher_type": voucher_type, "voucher_date": date_value, "total_amount": amount, "direction": _debit_credit(amount, voucher.get("ISDEEMEDPOSITIVE")), "raw_data": voucher, "created_by": identity.get("user_id")}
             existing = []
@@ -147,10 +221,19 @@ def _import(req, auth):
                 client.table("cashflow_tally_records").insert(source).execute(); counts["imported"] += 1
             if voucher_type in {"sales", "purchase"}:
                 entity_type = "customer" if voucher_type == "sales" else "vendor"
-                entity_id = entity_ids.get((party, entity_type)) or _entity(client, company_id, {"name": party or "Tally Party", "entity_type": entity_type, "gstin": None, "gstin_status": "unregistered"})
-                table = "cashflow_invoices" if voucher_type == "sales" else "cashflow_bills"; number_column = "invoice_number" if voucher_type == "sales" else "bill_number"; date_column = "invoice_date" if voucher_type == "sales" else "bill_date"; entity_column = "customer_id" if voucher_type == "sales" else "vendor_id"
-                payload = {"company_id": company_id, entity_column: entity_id, number_column: number, date_column: date_value, "due_date": date_value, "payment_terms_days": 0, "amount": amount, "gst_amount": 0, "status": "pending", "created_by": identity.get("user_id")} if voucher_type == "purchase" else {"company_id": company_id, entity_column: entity_id, number_column: number, date_column: date_value, "due_date": date_value, "amount": amount, "gst_amount": 0, "status": "pending", "is_proforma": False, "created_by": identity.get("user_id")}
-                client.table(table).upsert(payload, on_conflict=f"company_id,{number_column}").execute()
+                party_gstin = _text(voucher.get("party_gstin") or "").upper() or None
+                entity_id = entity_ids.get((party, entity_type)) or _entity(client, company_id, {"name": party or "Tally Party", "entity_type": entity_type, "gstin": party_gstin, "gstin_status": "registered" if party_gstin and GSTIN_RE.fullmatch(party_gstin) else "unregistered"})
+                if party_gstin:
+                    client.table("cashflow_entities").update({"gstin": party_gstin}).eq("company_id", company_id).eq("id", entity_id).execute()
+                if voucher_type == "purchase":
+                    _save_purchase_bill(client, company_id, entity_id, number, date_value, amount, voucher, identity)
+                else:
+                    payload = {"company_id": company_id, "customer_id": entity_id, "invoice_number": number, "invoice_date": date_value, "due_date": date_value, "amount": amount, "gst_amount": 0, "status": "pending", "is_proforma": False, "created_by": identity.get("user_id")}
+                    existing_invoice = client.table("cashflow_invoices").select("id").eq("company_id", company_id).eq("invoice_number", number).limit(1).execute().data or []
+                    if existing_invoice:
+                        client.table("cashflow_invoices").update(payload).eq("company_id", company_id).eq("id", existing_invoice[0]["id"]).execute()
+                    else:
+                        client.table("cashflow_invoices").insert(payload).execute()
             elif voucher_type in {"receipt", "payment"}:
                 transaction_type = "INFLOW" if voucher_type == "receipt" else "OUTFLOW"
                 allocations = voucher.get("allocations") or []
@@ -185,10 +268,14 @@ def _import(req, auth):
                         client.table("cashflow_transactions").update(payment_payload).eq("company_id", company_id).eq("id", existing_payment[0]["id"]).execute()
                     else:
                         client.table("cashflow_transactions").insert(payment_payload).execute()
-        except Exception:
+        except Exception as error:
             counts["errors"] += 1
+            voucher_number = _text(voucher.get("invoice_id") or voucher.get("VOUCHERNUMBER") or "unknown")
+            detail = {"voucherNo": voucher_number, "voucherType": _text(voucher.get("voucher_type") or "unknown"), "error": str(error)}
+            errors.append(detail)
+            LOGGER.exception("[Tally Import Error] Voucher %s failed: %s", voucher_number, error)
     audit.record(client, tenant_context, "upload", "tally_import", None, "success", {"counts": counts, "duplicates": duplicates})
-    return _json_response({"ok": True, "data": {**counts, "duplicates": duplicates, "dashboard": _dashboard(client, company_id)}})
+    return _json_response({"ok": True, "data": {**counts, "errors": errors, "duplicates": duplicates, "dashboard": _dashboard(client, company_id)}})
 
 def _export(req, auth):
     client = get_supabase_client(); company_id = auth["company_id"]; kind = _text(req.params.get("kind"))

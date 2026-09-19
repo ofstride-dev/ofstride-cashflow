@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -12,11 +12,13 @@ import {
   UserPlus,
   X,
   RefreshCw,
+  FileCheck2,
 } from 'lucide-react';
 import { cashflowFetch } from '../../services/cashflowApi';
 import { useCashflowAuth } from '../../context/CashflowAuthContext';
 import CashflowLoadingScreen from './CashflowLoadingScreen';
 import { supabase } from '../../services/supabase';
+import ofstrideLogo from '../../assets/ofs-cashpuls-logo.png';
 
 const NAV_ITEMS = [
   { label: 'Dashboard', path: '/cashflow/dashboard', icon: LayoutDashboard },
@@ -24,6 +26,7 @@ const NAV_ITEMS = [
   { label: 'Receivables (AR)', path: '/cashflow/ar', icon: ArrowDownCircle },
   { label: 'Bank Reconcile', path: '/cashflow/reconcile', icon: GitCompareArrows },
   { label: 'Tally Sync', path: '/cashflow/tally-sync', icon: RefreshCw },
+  { label: 'GSTR-2B Reconcile', path: '/cashflow/gstr-reconcile', icon: FileCheck2 },
   { label: 'Expense Portal', path: '/cashflow/expense', icon: IndianRupee },
 ];
 
@@ -66,6 +69,7 @@ function CashflowShell() {
   const { session, profile, signOut, isAdmin, loading } = useCashflowAuth();
 
   const location = useLocation();
+  const navigate = useNavigate();
   const isLoginRoute = location.pathname.replace(/\/$/, '') === '/cashflow/login';
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
@@ -205,9 +209,10 @@ function CashflowShell() {
     <div className="dashboard-app min-h-screen lg:flex">
       {/* Desktop sidebar */}
       <aside className="dashboard-sidebar hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 lg:sticky lg:top-0 lg:h-screen">
-          <Link to="/cashflow/dashboard" className="block px-5 py-6 border-b border-white/10 transition-opacity hover:opacity-85" aria-label="Go to CashPulse dashboard">
-            <p className="dashboard-sidebar-brand-parent">Ofstride Services</p>
-            <h1 className="dashboard-sidebar-brand-product">CashPulse</h1>
+          <Link to="/cashflow/dashboard" className="block px-5 pt-3 pb-6 border-b border-white/10 transition-opacity hover:opacity-85" aria-label="Go to CashPulse dashboard">
+            <div className="w-56 p-0 leading-none">
+              <img src={ofstrideLogo} alt="Ofstride CashPulse" className="h-auto w-full object-contain" />
+            </div>
             <p className="mt-5 text-[0.75rem] font-bold uppercase tracking-[0.16em] text-slate-500">Workspace</p>
           </Link>
         <div className="flex-1 overflow-y-auto px-3 py-4">
@@ -243,11 +248,12 @@ function CashflowShell() {
             className="absolute inset-0 bg-slate-900/45 backdrop-blur-[1px]"
             onClick={() => setIsMobileNavOpen(false)}
           />
-          <div className="dashboard-sidebar relative z-10 flex h-full w-72 max-w-[85vw] flex-col shadow-2xl">
+          <div className="dashboard-sidebaR relative z-10 flex h-full w-72 max-w-[85vw] flex-col shadow-2xl">
             <div className="flex items-center justify-between px-5 py-5 border-b border-white/10">
               <Link to="/cashflow/dashboard" onClick={() => setIsMobileNavOpen(false)} aria-label="Go to CashPulse dashboard">
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">OfStride</p>
-                <h1 className="text-lg font-bold text-white mt-1">CashPulse</h1>
+                <span className="block w-56 p-0 pt-2 leading-none">
+                  <img src={ofstrideLogo} alt="Ofstride CashPulse" className="h-auto w-full object-contain" />
+                </span>
               </Link>
               <button
                 type="button"

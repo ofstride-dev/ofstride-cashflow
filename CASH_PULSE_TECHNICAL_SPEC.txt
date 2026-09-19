@@ -1,0 +1,45 @@
+CASH PULSE — TECHNICAL SPECIFICATION SUMMARY
+
+1) CORE PROBLEM SOLVED
+
+CashPulse is a multi-tenant finance workspace for small and medium businesses. It replaces fragmented finance administration with one company-scoped workspace for accounts payable (vendor bills), accounts receivable (customer invoices and collections), payments, petty cash, cashflow reporting, and bank-statement reconciliation. It improves visibility into cash inflow/outflow, outstanding obligations, and accrual performance while reducing manual reconciliation effort and enforcing safer collaboration through authenticated tenant and role controls.
+
+2) TECH STACK
+
+Frontend: React 19 single-page application using JavaScript/JSX (plus TypeScript service files), Vite 8, React Router, Tailwind CSS v4/CSS, Recharts, lucide-react, xlsx, Supabase Auth, and Supabase-backed API clients.
+
+Backend: Python Azure Functions (per-function function.json model) under api/, with a separate comms-api deployment for notifications. Shared services provide bearer-token authentication, tenant context/policy, audit, API contracts, rate limiting, and observability. Parsing/processing libraries include pandas, openpyxl, PyMuPDF, pypdf, and Azure Document Intelligence (prebuilt-layout for scanned PDFs/images).
+
+Database: Supabase PostgreSQL and Supabase Auth as the system of record. Financial access is company-scoped through verified TenantContext and PostgreSQL Row Level Security. Core tables include cashflow_entities, cashflow_bills, cashflow_invoices, cashflow_transactions, cashflow_petty_cash, bank-reconciliation run/row tables, and audit data.
+
+AI tools: Azure OpenAI/OpenAI-compatible clients, Google Gemini, and an optional mock provider through the shared LLM factory; Azure AI Document Intelligence for OCR/layout extraction; Langfuse for analyst tracing. Provider selection includes health/circuit-breaker handling and configurable timeouts. Deterministic CashPulse CRUD and ledger calculations do not require an LLM.
+
+3) LEDGER AND AGENTIC ARCHITECTURE DETAILS
+
+AR/AP balances:
+- AR invoices store net amount plus GST. Gross AR = amount + gst_amount.
+- AP bills store amount as the gross bill value; GST is not added a second time.
+- For each invoice/bill, the repositories read tenant-scoped cashflow_transactions and sum transaction amounts by invoice_id or bill_id.
+- Balance due = max(gross document value - cumulative linked payments, 0), rounded to two decimals. Fully settled documents are marked/treated as Paid.
+- Aging includes only pending, approved, or overdue documents and buckets the remaining balance as overdue (due date before today), due soon (within seven days), or not due. Missing due dates are reported as unavailable/not due rather than guessed.
+- Cash reporting classifies INFLOW transactions as receipts and OUTFLOW transactions as payments. Accrual P&L is separate: accrued revenue = AR gross invoice totals; accrued expenses = AP gross bill totals; direct expenses are OUTFLOW transactions with neither invoice_id nor bill_id; net P&L = accrued revenue - accrued expenses - direct expenses.
+
+cashflow_transactions and unlinked transactions:
+- A transaction may link to exactly one parent document: invoice_id for an AR collection or bill_id for an AP payment. Payment creation rejects both/neither parent IDs, missing/cancelled parents, invalid dates, and amounts exceeding the remaining parent balance.
+- Linked transactions contribute to the parent document's cumulative paid amount and to cash inflow/outflow. Transactions without invoice_id and bill_id remain valid standalone cash movements; an unlinked OUTFLOW is counted as a direct expense, while an unlinked INFLOW is a standalone cash receipt. They are not allocated against AR/AP balances.
+- Server-side inserts attach company_id and created_by. All reads and writes are filtered to the verified tenant company, not a client-supplied company ID.
+
+AI financial analyst flow (agentic boundary):
+- The read-only analyst endpoint accepts bounded intents/questions, rejects mutation language, resolves the tenant and date range, and reuses the dashboard repository's coordinated read of transactions, invoices, bills, expenses, and related evidence.
+- Metrics and dashboard_summary (including AR/AP aging and P&L) are calculated deterministically before any model call. Evidence is narrowed to the intent and sent to the selected LLM with rules to use only supplied figures and return strict JSON.
+- The current implementation does NOT use OpenAI tools/function definitions or permit model-selected database tools. Its tool-like architecture is controlled server-side evidence retrieval plus deterministic calculation, followed by LLM synthesis only.
+- The analyst is explicitly read-only: no approvals, payments, reconciliation writes, SQL, or other mutations. If the provider is unavailable, times out, returns malformed output, or fails validation, a deterministic grounded response is returned and fallback/provider/latency metadata is recorded. Langfuse tracing captures sources, unavailable sources, metrics, provider, fallback status, and latency.
+
+4) KEY PERFORMANCE AND RELIABILITY OUTCOMES
+
+- Analyst evidence reads are coordinated/reused through the dashboard path, avoiding duplicate queries; independent blocking Supabase reads are parallelizable with a thread pool, reducing total latency from the sum of round trips toward the slowest read.
+- Reasoning models are detected before invocation and called with low configurable reasoning effort/verbosity on the first attempt, avoiding a known failed-call retry round trip. LLM calls have bounded timeouts; provider failures use a circuit breaker and optional mock fallback.
+- Deterministic metric calculation and deterministic analyst fallback preserve useful, auditable answers when AI is unavailable. Strict JSON validation prevents malformed model fields from replacing safe fallback values.
+- Tenant isolation is enforced server-side through bearer authentication, membership/role resolution, TenantContext, company filters, and PostgreSQL RLS. Payment mutations are role-restricted and audited; the analyst is read-only.
+- Missing/unmigrated tables return recoverable empty/setup responses rather than leaking database details. Reconciliation/parser warnings are non-blocking when rows remain reviewable, and stale frontend requests are guarded against identity/company changes.
+- Azure Functions host timeout is five minutes. Reconciliation remains synchronous and can approach that limit; OCR, large in-memory spreadsheets, Python-side matching, multiple dashboard queries, and frontend bundle size are known scaling constraints. No production latency/throughput benchmark is claimed by the repository; latency is instrumented in analyst logs/traces (auth, evidence, synthesis, and total milliseconds).

@@ -67,6 +67,15 @@ def _invite_body(company_name: str, role: str, accept_url: str, sent_by: str) ->
     )
 
 
+def _mark_delivery(db, idempotency_key: str, status: str, last_error: str | None = None) -> None:
+    try:
+        db.table("email_deliveries").update(
+            {"status": status, "last_error": last_error}
+        ).eq("idempotency_key", idempotency_key).execute()
+    except Exception:
+        return
+
+
 async def main(req: func.HttpRequest) -> func.HttpResponse:
     trace_id = get_trace_id(req)
     if req.method == "OPTIONS":
@@ -124,18 +133,37 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     if not idempotency_key:
         return error_response(error_type="validation", message="idempotency_key is required.", trace_id=trace_id, req=req, status_code=400)
 
-    db = _delivery_client()
+    try:
+        db = _delivery_client()
+    except Exception as exc:
+        return error_response(
+            error_type="infra",
+            message="Email delivery service could not connect to Supabase.",
+            trace_id=trace_id,
+            req=req,
+            status_code=503,
+            details={"stage": "supabase_client", "reason": str(exc)},
+        )
     if not db:
         return error_response(error_type="infra", message="Email delivery service is not configured.", trace_id=trace_id, req=req, status_code=503)
-    if db:
+    try:
         claimed = db.rpc("claim_email_delivery", {"p_idempotency_key": idempotency_key}).execute().data or []
         existing = db.table("email_deliveries").select("status").eq("idempotency_key", idempotency_key).limit(1).execute().data or []
-        if not existing:
-            return error_response(error_type="validation", message="Unknown email delivery.", trace_id=trace_id, req=req, status_code=409)
-        if existing[0].get("status") == "sent":
-            return ok_response(data={"invite_sent": True, "idempotent": True}, trace_id=trace_id, req=req)
-        if not claimed:
-            return ok_response(data={"invite_sent": True, "delivery_pending": True, "idempotent": True}, trace_id=trace_id, req=req, status_code=202)
+    except Exception as exc:
+        return error_response(
+            error_type="infra",
+            message="Email delivery state could not be read from Supabase.",
+            trace_id=trace_id,
+            req=req,
+            status_code=503,
+            details={"stage": "supabase_delivery_state", "reason": str(exc)},
+        )
+    if not existing:
+        return error_response(error_type="validation", message="Unknown email delivery.", trace_id=trace_id, req=req, status_code=409)
+    if existing[0].get("status") == "sent":
+        return ok_response(data={"invite_sent": True, "idempotent": True}, trace_id=trace_id, req=req)
+    if not claimed:
+        return ok_response(data={"invite_sent": True, "delivery_pending": True}, trace_id=trace_id, req=req, status_code=202)
 
     try:
         send_email(
@@ -143,18 +171,16 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
             subject=_invite_subject(company_name),
             plain_text=_invite_body(company_name, role, accept_url, sent_by),
         )
-        if db:
-            db.table("email_deliveries").update({"status": "sent", "last_error": None}).eq("idempotency_key", idempotency_key).execute()
+        _mark_delivery(db, idempotency_key, "sent")
     except Exception as exc:
-        if db:
-            db.table("email_deliveries").update({"status": "unknown", "last_error": "provider_send_failed"}).eq("idempotency_key", idempotency_key).execute()
+        _mark_delivery(db, idempotency_key, "unknown", "provider_send_failed")
         return error_response(
             error_type="infra",
             message="Failed to send admin invite email.",
             trace_id=trace_id,
             req=req,
             status_code=500,
-            details={"reason": str(exc)},
+            details={"stage": "acs_send", "reason": str(exc)},
         )
 
     support_error = None

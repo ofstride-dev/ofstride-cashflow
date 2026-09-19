@@ -99,8 +99,8 @@ function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="dashboard-tooltip">
-      <p className="text-[0.68rem] font-bold uppercase tracking-wider text-slate-400">{label}</p>
-      {payload.map((entry) => <p key={entry.dataKey} className="mt-1 text-sm font-semibold text-white">{entry.name}: {formatMoney(entry.value)}</p>)}
+      <p className="text-[0.68rem] font-bold uppercase tracking-wider text-slate-500">{label}</p>
+      {payload.map((entry) => <p key={entry.dataKey} className="mt-1 text-sm font-semibold text-slate-800">{entry.name}: {formatMoney(entry.value)}</p>)}
     </div>
   );
 }

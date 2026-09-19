@@ -293,7 +293,7 @@ html { font-size: 85%; }
 .dashboard-live-pill { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid rgba(52,211,153,.25); border-radius: 999px; background: rgba(52,211,153,.08); padding: .35rem .65rem; color: #6ee7b7; font-size: .68rem; font-weight: 700; }
 .dashboard-live-pill span { width: .4rem; height: .4rem; border-radius: 999px; background: #34d399; box-shadow: 0 0 10px #34d399; animation: live-pulse 2s ease-in-out infinite; }
 .legend-dot { display: inline-block; width: .45rem; height: .45rem; margin-right: .35rem; border-radius: 999px; }
-.dashboard-tooltip { min-width: 130px; border: 1px solid rgba(255,255,255,.12); border-radius: .75rem; background: rgba(8,14,26,.92); padding: .7rem .8rem; box-shadow: 0 14px 30px -15px #000; backdrop-filter: blur(14px); }
+.dashboard-tooltip { min-width: 150px; border: 1px solid #cbd5e1; border-radius: .75rem; background: rgba(255,255,255,.98); padding: .7rem .8rem; box-shadow: 0 14px 30px -15px rgba(15,23,42,.28); color: #0f172a; }
 @keyframes live-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.75); } }
 @keyframes orbit-drift { 0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); } 50% { transform: translate3d(-10px, 14px, 0) rotate(8deg); } }
 @keyframes preview-rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }

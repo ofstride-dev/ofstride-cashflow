@@ -4,6 +4,7 @@
 // restyled onto the shared design system.
 
 import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Download, Edit2, FileUp, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { cashflowFetch, parseCashflowResponse } from '../../services/cashflowApi';
 import { exportRowsAsCsv } from '../../services/csvExport';
@@ -54,6 +55,7 @@ function TableSkeleton() {
 }
 
 export default function AccountsPayable() {
+  const location = useLocation();
   const { isAdmin, session, profile } = useCashflowAuth();
   const authIdentityKey = `${session?.user?.id || ''}:${profile?.company_id || ''}`;
   const activeIdentityKeyRef = useRef(authIdentityKey);
@@ -114,6 +116,22 @@ export default function AccountsPayable() {
       }
     };
   }, [authIdentityKey]);
+
+  useEffect(() => {
+    const prefill = location.state?.gstrPrefill;
+    if (!prefill) return;
+    setFormData((previous) => ({
+      ...previous,
+      vendor_gstin: prefill.vendor_gstin || previous.vendor_gstin,
+      bill_number: prefill.bill_number || previous.bill_number,
+      bill_date: prefill.bill_date || previous.bill_date,
+      amount_before_gst: prefill.amount_before_gst ?? previous.amount_before_gst,
+      gst_amount: prefill.gst_amount ?? previous.gst_amount,
+      total_amount: prefill.total_amount ?? previous.total_amount,
+      amount: prefill.total_amount ?? previous.amount,
+    }));
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }, [location.state]);
 
   const fetchInvoices = async (isRequestCurrent = () => true) => {
     try {

@@ -101,7 +101,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             supabase.table("cashflow_invoices")
             .select("*, cashflow_entities!cashflow_invoices_customer_id_fkey(id,name,gstin)")
             .eq("company_id", company_id)
-            .in_("status", ["approved", "paid"])
+            .in_("status", ["pending", "approved", "paid", "overdue"])
             .eq("is_proforma", False)
             .gte("invoice_date", start_date)
             .lte("invoice_date", end_date)
@@ -113,7 +113,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             supabase.table("cashflow_bills")
             .select("*, cashflow_entities!cashflow_bills_vendor_id_fkey(id,name,gstin)")
             .eq("company_id", company_id)
-            .in_("status", ["approved", "paid"])
+            .in_("status", ["pending", "approved", "paid", "overdue"])
             .gte("bill_date", start_date)
             .lte("bill_date", end_date)
             .order("bill_date", desc=False)
@@ -220,13 +220,15 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
         for bill in bills_res.data or []:
             vendor = bill.get("cashflow_entities") or {}
-            vendor_gstin = str(vendor.get("gstin") or "")
+            vendor_gstin = str(bill.get("supplier_gstin") or vendor.get("gstin") or "")
 
             amount = _num(bill.get("amount"))
-            gst_amount = _num(bill.get("gst_amount"))
-            taxable_value = round(max(amount - gst_amount, 0.0), 2)
+            gst_amount = _num(bill.get("gst_amount")) or (_num(bill.get("cgst_amount")) + _num(bill.get("sgst_amount")) + _num(bill.get("igst_amount")))
+            taxable_value = _num(bill.get("taxable_value")) or round(max(amount - gst_amount, 0.0), 2)
 
-            split = _split_tax(gst_amount, vendor_gstin, company_gstin)
+            split = {"igst": _num(bill.get("igst_amount")), "cgst": _num(bill.get("cgst_amount")), "sgst": _num(bill.get("sgst_amount"))}
+            if not any(split.values()):
+                split = _split_tax(gst_amount, vendor_gstin, company_gstin)
 
             itc_taxable += taxable_value
             itc_igst += split["igst"]

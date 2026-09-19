@@ -40,7 +40,9 @@ def _load_local_settings(path: Path) -> None:
     if not path.exists() or not path.is_file():
         return
     try:
-        values = json.loads(path.read_text(encoding="utf-8")).get("Values", {})
+        # Azure Functions tooling commonly writes local.settings.json with a
+        # UTF-8 BOM. utf-8-sig accepts both BOM-prefixed and regular JSON files.
+        values = json.loads(path.read_text(encoding="utf-8-sig")).get("Values", {})
     except (OSError, ValueError, TypeError):
         return
     if not isinstance(values, dict):

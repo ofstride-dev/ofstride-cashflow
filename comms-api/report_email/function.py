@@ -12,6 +12,8 @@ if shared_path not in sys.path:
 
 from email_client import get_email_client
 from http_utils import error_response, get_trace_id, ok_response, options_response
+from supabase import create_client
+from rate_limit import allow
 
 
 def _escape(value):
@@ -43,11 +45,29 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     supplied = req.headers.get("x-report-email-secret", "")
     if not expected or supplied != expected:
         return error_response(error_type="auth", message="Report email authentication failed.", trace_id=trace_id, req=req, status_code=401)
+    allowed, retry_after = allow("report")
+    if not allowed:
+        return error_response(error_type="infra", message=f"Too many email requests. Try again in {retry_after} seconds.", trace_id=trace_id, req=req, status_code=429, details={"retry_after": retry_after})
     try:
         body = req.get_json()
         if not isinstance(body, dict):
             raise ValueError("Request body must be a JSON object.")
         recipients = sorted({str(item).strip().lower() for item in body.get("recipients", []) if str(item).strip()})
+        idempotency_key = str(body.get("idempotency_key") or "").strip()
+        if not idempotency_key:
+            raise ValueError("idempotency_key is required.")
+        supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+        supabase_key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or "").strip()
+        db = create_client(supabase_url, supabase_key) if supabase_url and supabase_key else None
+        if db:
+            claimed = db.rpc("claim_email_delivery", {"p_idempotency_key": idempotency_key}).execute().data or []
+            existing = db.table("email_deliveries").select("status").eq("idempotency_key", idempotency_key).limit(1).execute().data or []
+            if not existing:
+                raise ValueError("Unknown email delivery.")
+            if existing[0].get("status") == "sent":
+                return ok_response(data={"sent": len(recipients), "idempotent": True}, trace_id=trace_id, req=req)
+            if not claimed:
+                return ok_response(data={"sent": 0, "delivery_pending": True, "idempotent": True}, trace_id=trace_id, req=req, status_code=202)
         if not recipients or len(recipients) > 500:
             raise ValueError("Between 1 and 500 recipients are required.")
         period = body.get("period") or {}
@@ -64,6 +84,8 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         for recipient in recipients:
             poller = client.begin_send({"senderAddress": os.environ["EMAIL_SENDER_ADDRESS"], "content": {"subject": title, "plainText": plain}, "recipients": {"to": [{"address": recipient}]}, "attachments": [{"name": f"ofstride-{body.get('report_type', 'weekly')}-cashflow.pdf", "contentType": "application/pdf", "contentInBase64": attachment}]})
             poller.result()
+        if db:
+            db.table("email_deliveries").update({"status": "sent", "last_error": None}).eq("idempotency_key", idempotency_key).execute()
         return ok_response(data={"sent": len(recipients)}, trace_id=trace_id, req=req)
     except ValueError as exc:
         return error_response(error_type="validation", message=str(exc), trace_id=trace_id, req=req, status_code=400)
